@@ -94,6 +94,7 @@ const monitor = createPerformanceMonitor();
 const paintMeasurements = bindMeasurementPanel(monitor);
 const learning = createLearningTools({
   base, getCursor: () => cursor, getPlane: () => activePlane, views: mpr.entries,
+  onRetry: retryAssets,
   onPreset: value => {
     if (layout !== 'mpr') selectLayout('axial');
     else activatePlane('axial');
@@ -479,24 +480,51 @@ new ResizeObserver(drawAR).observe(viewport);
 
 viewport.classList.add('is-orbitable');
 const formats = volumeFormats(available);
-const firstMetadata = formats.length ? loadVolumeMetadata(base, formats[0]).catch(() => null) : Promise.resolve(null);
-import('../ar/projection.js').then(({ createProjection }) => createProjection({
-  canvas: byId('projection-image'), ring: byId('lens-guide'), base,
-  labels: byId('model-labels'), labelCard: byId('model-label-card'),
-  onSelection: drawAR,
-  available, metadata: firstMetadata,
-})).then(result => {
-  projection = result;
-  modelSource = result.modelSources;
-  updateSourceBadge();
-  drawAR();
-}).catch(() => {
-  modelSource = ['unavailable', 'unavailable'];
-  updateSourceBadge();
-  byId('projection-error').hidden = false;
-}).finally(() => {
-  byId('projection-loading').hidden = true;
-});
+const projectionFeedback = byId('projection-feedback');
+const projectionLabel = byId('projection-loading');
+const projectionProgress = byId('projection-progress');
+const retryProjection = byId('retry-projection');
+let projectionReady = false;
+
+async function loadProjection(metadata, options) {
+  if (projectionReady) return;
+  projectionFeedback.hidden = false;
+  projectionProgress.hidden = false;
+  projectionProgress.removeAttribute('value');
+  projectionLabel.textContent = '正在加载 3D 颅脑';
+  try {
+    if (!projection) {
+      const { createProjection } = await import('../ar/projection.js');
+      projection = createProjection({
+        canvas: byId('projection-image'), ring: byId('lens-guide'), base,
+        labels: byId('model-labels'), labelCard: byId('model-label-card'),
+        onSelection: drawAR, available,
+      });
+    }
+    await projection.loadModels(metadata, {
+      ...options,
+      onProgress(received, total) {
+        if (options.signal.aborted || !total) return;
+        const percent = Math.min(100, Math.round(received / total * 100));
+        projectionProgress.value = percent;
+        const label = `正在加载 3D 颅脑 ${percent}%`;
+        if (projectionLabel.textContent !== label) projectionLabel.textContent = label;
+      },
+    });
+    modelSource = projection.modelSources;
+    drawAR();
+    projectionReady = !modelSource.includes('fallback');
+    projectionLabel.textContent = '3D 模型加载失败，正在显示占位模型。';
+  } catch {
+    if (options.signal.aborted) return;
+    projectionLabel.textContent = '3D 颅脑暂不可用。';
+  } finally {
+    projectionProgress.hidden = true;
+    projectionFeedback.hidden = projectionReady;
+    retryProjection.hidden = projectionReady || options.signal.aborted;
+    updateSourceBadge();
+  }
+}
 
 function showSeries(series) {
   const previousDimensions = dimensions;
@@ -526,6 +554,10 @@ const loadReadout = byId('volume-load-readout');
 const loadBar = byId('volume-load-bar');
 const retryVolume = byId('retry-volume');
 let showingPreview = false;
+let fullReady = false;
+let volumeMetadata;
+let loading;
+let restarting = false;
 let progressFrame;
 function showProgress(received, total) {
   cancelAnimationFrame(progressFrame);
@@ -542,45 +574,90 @@ function showProgress(received, total) {
   });
 }
 
-async function loadImaging(initial = false) {
-  loadingPanel.hidden = false;
-  retryVolume.hidden = true;
+async function loadImaging(metadata, options) {
+  if (fullReady) return;
   loadBar.hidden = false;
-  loadLabel.textContent = showingPreview ? '低分辨率预览 · 加载完整 CT / MRI' : '正在加载断层影像';
-  showProgress(0, 0);
+  const prefix = showingPreview ? '低分辨率预览 · ' : '';
   try {
     const series = await loadVolumePair(base, available, {
-      firstMetadata: initial ? firstMetadata : undefined,
-      onProgress: showProgress,
-      async onMetadata(metadata, format) {
-        if (!paintSlices && format[0] === 'meta.json' && import.meta.env.PROD && typeof DecompressionStream === 'function') {
-          try {
-            showSeries(await loadVolumePreview(base, metadata));
-            showingPreview = true;
-          } catch {
-            // 完整体数据也可以独立加载。
-          }
-        }
-        loadLabel.textContent = showingPreview ? '低分辨率预览 · 加载完整断层' : '正在下载完整断层影像';
+      ...options,
+      firstMetadata: Promise.resolve(metadata),
+      onProgress(received, total, modality) {
+        if (options.signal.aborted) return;
+        const label = `${prefix}正在下载完整 ${modality}`;
+        if (loadLabel.textContent !== label) loadLabel.textContent = label;
+        showProgress(received, total);
       },
       hasPreview: () => Boolean(paintSlices),
     });
+    if (options.signal.aborted) return;
     if (series) showSeries(series);
-    loadingPanel.hidden = Boolean(series && series.source !== 'fallback');
-    if (loadingPanel.hidden) showingPreview = false;
+    fullReady = Boolean(series && series.source !== 'fallback');
+    loadingPanel.hidden = fullReady;
+    if (fullReady) showingPreview = false;
     else loadLabel.textContent = showingPreview ? '完整影像加载失败，已保留低分辨率预览。' : '完整影像加载失败，正在显示合成断层。';
   } catch {
-    loadLabel.textContent = '断层影像暂不可用。';
+    if (!options.signal.aborted) loadLabel.textContent = '断层影像暂不可用。';
   } finally {
     cancelAnimationFrame(progressFrame);
     loadBar.hidden = true;
     loadReadout.textContent = '';
-    retryVolume.hidden = loadingPanel.hidden;
+    retryVolume.hidden = fullReady || options.signal.aborted;
   }
 }
 
-retryVolume.addEventListener('click', () => loadImaging());
-loadImaging(true);
+async function loadWorkstation(options) {
+  if (!fullReady) {
+    loadingPanel.hidden = false;
+    loadBar.hidden = true;
+    loadLabel.textContent = showingPreview ? '低分辨率预览 · 等待加载完整断层' : '正在加载断层预览';
+  }
+  const metadata = formats.length && !volumeMetadata
+    ? loadVolumeMetadata(base, formats[0], options).then(value => (volumeMetadata = value)).catch(() => null)
+    : Promise.resolve(volumeMetadata ?? null);
+  const preview = !fullReady && !showingPreview && formats[0]?.[0] === 'meta.json' && import.meta.env.PROD
+    ? loadVolumePreview(base, metadata, options).then(series => {
+      if (!series || options.signal.aborted) return;
+      showSeries(series);
+      showingPreview = true;
+      loadLabel.textContent = '低分辨率预览 · 等待加载完整断层';
+    }).catch(() => {})
+    : null;
+  const [info] = await Promise.all([metadata, preview, learning.loadAnnotations(options)]);
+  if (options.signal.aborted) return;
+  if (!fullReady) {
+    const prefix = showingPreview ? '低分辨率预览 · ' : '';
+    loadLabel.textContent = prefix + '等待 3D 加载后下载完整断层';
+  }
+  await loadProjection(info, options);
+  if (!options.signal.aborted) await loadImaging(info, options);
+}
+
+function startLoading(reload = false) {
+  const controller = new AbortController();
+  const done = loadWorkstation({ signal: controller.signal, reload }).finally(() => { loading = null; });
+  loading = { controller, done };
+}
+
+async function retryAssets() {
+  if (restarting) return;
+  restarting = true;
+  retryProjection.hidden = true;
+  retryVolume.hidden = true;
+  try {
+    if (loading) {
+      loading.controller.abort();
+      await loading.done;
+    }
+    startLoading(true);
+  } finally {
+    restarting = false;
+  }
+}
+
+retryProjection.addEventListener('click', retryAssets);
+retryVolume.addEventListener('click', retryAssets);
+startLoading();
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator && isSecureContext) {
   navigator.serviceWorker.register(base + 'sw.js', { updateViaCache: 'none' }).catch(() => {});

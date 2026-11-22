@@ -41,7 +41,9 @@ export async function prepareMedicalAssets(directory) {
       const preview = previewDimensions(dimensions);
       const parts = [sample(ct, dimensions, preview, 2)];
       if (mri) parts.push(sample(mri, dimensions, preview, 1));
-      files.set('volume-preview.bin', Buffer.concat(parts));
+      const bytes = Buffer.concat(parts);
+      await writeFile(join(directory, 'volume-preview.bin'), bytes);
+      files.set('volume-preview.bin', bytes);
     }
   }
   await Promise.all([...files].map(async ([name, bytes]) => {

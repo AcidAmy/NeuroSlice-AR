@@ -263,6 +263,8 @@ button, .status-point, .slice-lock { flex-shrink: 0; }
   text-align: center;
   font-size: 12px;
 }
+.viewport-feedback progress { display: block; width: 100%; height: 4px; margin-top: 4px; accent-color: var(--selection); }
+.viewport-feedback button { margin-top: 4px; }
 .feature-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
 .feature-toggle[aria-pressed="true"] { color: var(--selection); }
 .toggle-indicator { width: 6px; height: 6px; border: 1px solid var(--quiet); border-radius: 2px; }

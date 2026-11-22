@@ -13,7 +13,7 @@ function validLayers(layers) {
     new Set(layers.map(layer => layer.id)).size === layers.length;
 }
 
-export function createLearningTools({ base, getCursor, getPlane, views, onPreset, onRoundStart }) {
+export function createLearningTools({ base, getCursor, getPlane, views, onPreset, onRoundStart, onRetry }) {
   const byId = id => document.getElementById(id);
   const markerKeys = new WeakMap();
   const layerLabel = byId('annotation-layer');
@@ -213,10 +213,11 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
   });
   submitButton.addEventListener('click', submit);
   nextButton.addEventListener('click', startRound);
-  async function loadAnnotations() {
+  async function loadAnnotations(options) {
+    if (layers.length) return;
     retry.disabled = true;
     try {
-      const data = await readAssetJson(base + 'data/annotations.json', { priority: 'high' });
+      const data = await readAssetJson(base + 'data/annotations.json', { ...options, priority: 'high' });
       if (!validLayers(data)) throw new Error('解剖标注格式有误');
       layers = data;
       loadFailed = false;
@@ -230,11 +231,10 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     drawAnnotations();
     startRound();
   }
-  retry.addEventListener('click', loadAnnotations);
-  loadAnnotations();
+  retry.addEventListener('click', onRetry);
 
   return {
-    drawAnnotations, setMode, checkDeadline,
+    drawAnnotations, setMode, checkDeadline, loadAnnotations,
     setLayout(value) {
       if (layout === value) return;
       layout = value;

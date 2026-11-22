@@ -40,13 +40,22 @@ export function createModelMaterials(skull, brain, { headSpace, aperture, clipHa
     parts.push({ mesh, isBone, xray, specimen, base, highlight });
   }
 
-  for (const [group, isBone] of [[skull, true], [brain, false]]) {
+  function setGroup(group, isBone) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i].isBone !== isBone) continue;
+      const [part] = parts.splice(i, 1);
+      part.xray.dispose();
+      part.specimen.dispose();
+    }
     let index = 0;
     group.traverse(mesh => { if (mesh.isMesh) addPart(mesh, isBone, index++); });
   }
+  setGroup(skull, true);
+  setGroup(brain, false);
 
   return {
-    parts: parts.map(part => part.mesh),
+    get parts() { return parts.map(part => part.mesh); },
+    setGroup,
     update({ mode, opacity, layer, lens, selected, viewAxisHead }) {
       const transparent = opacity < 1 || lens;
       for (const { mesh, isBone, xray, specimen, base, highlight } of parts) {

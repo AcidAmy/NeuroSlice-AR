@@ -175,13 +175,14 @@ export function createModelLabels(overlay, card, anatomy) {
     onChange();
   }
 
-  closeButton.addEventListener('click', () => close(true));
+  const listeners = new AbortController();
+  closeButton.addEventListener('click', () => close(true), { signal: listeners.signal });
   card.parentElement.addEventListener('keydown', event => {
     if (event.key === 'Escape' && selected) {
       event.stopPropagation();
       close(true);
     }
-  });
+  }, { signal: listeners.signal });
 
   function placeColumn(items, x, height) {
     items.sort((a, b) => a.y - b.y);
@@ -243,6 +244,11 @@ export function createModelLabels(overlay, card, anatomy) {
   return {
     update,
     close,
+    dispose() {
+      close(false, false);
+      listeners.abort();
+      for (const record of records) record.node.remove();
+    },
     get selectedMeshes() { return selectedMeshes; },
     selectMesh(mesh) {
       const record = partsToRecord.get(mesh);

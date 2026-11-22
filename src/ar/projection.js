@@ -16,30 +16,32 @@ export function setLayerVisibility(skullGroup, brainGroup, layer) {
   brainGroup.visible = layer === 'brain' || layer === 'combined';
 }
 
-async function loadGeometry(base, available, name, material, makePhantom) {
-  if (available.includes(name)) {
-    try {
-      const directory = new URL(base + 'assets/', document.baseURI);
-      const bytes = await readCompressedOrRaw(new URL(name, directory).href, { preferGzip: import.meta.env?.PROD });
-      if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) {
-        throw new Error('GLB 文件头无效');
-      }
-      const { scene } = await new GLTFLoader().parseAsync(bytes, directory.href);
-      let hasSurface = false;
-      scene.traverse(object => {
-        if (object.isMesh && object.geometry.getAttribute('position')?.count >= 3) {
-          if (!object.geometry.getAttribute('normal')) object.geometry.computeVertexNormals();
-          object.material = material;
-          hasSurface = true;
+async function loadGeometry(directory, { name, material, makePhantom }, options) {
+  try {
+    const object = await readCompressedOrRaw(new URL(name, directory).href, {
+      ...options, preferGzip: import.meta.env?.PROD, idle: 30000,
+      async parse(bytes) {
+        if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) {
+          throw new Error('GLB 文件头无效');
         }
-      });
-      if (hasSurface) return { object: scene, source: 'local' };
-    } catch {
-      return { object: makePhantom(), source: 'fallback' };
-    }
+        const { scene } = await new GLTFLoader().parseAsync(bytes, directory.href);
+        let hasSurface = false;
+        scene.traverse(object => {
+          if (object.isMesh && object.geometry.getAttribute('position')?.count >= 3) {
+            if (!object.geometry.getAttribute('normal')) object.geometry.computeVertexNormals();
+            object.material = material;
+            hasSurface = true;
+          }
+        });
+        if (!hasSurface) throw new Error('GLB 未包含可用表面');
+        return scene;
+      },
+    });
+    return { object, source: 'local' };
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
     return { object: makePhantom(), source: 'fallback' };
   }
-  return { object: makePhantom(), source: 'phantom' };
 }
 
 export function pickAnatomy(raycaster, meshes, { half, inverseHead }) {
@@ -53,7 +55,7 @@ export function pickAnatomy(raycaster, meshes, { half, inverseHead }) {
     })?.object;
 }
 
-export async function createProjection({ canvas, ring, labels, labelCard, base, available, metadata, onSelection = () => {} }) {
+export function createProjection({ canvas, ring, labels, labelCard, base, available, onSelection = () => {} }) {
   const contextOptions = { alpha: true, antialias: true };
   const context = canvas.getContext('webgl2', contextOptions) || canvas.getContext('webgl', contextOptions);
   if (!context) throw new Error('WebGL 不可用');
@@ -85,23 +87,14 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
   const fluidShader = createXRayFresnelShader({
     tint: '#D9B3AE', rimTint: '#F6D2CC', shadowTint: '#7C3F44', density: 0.68, edgePower: 2.7, body: 0.26,
   });
-  const load = async (name, material, makePhantom) => {
-    const [loaded, info] = await Promise.all([loadGeometry(base, available, name, material, makePhantom), metadata]);
-    if (Array.isArray(info?.meshFiles) && !info.meshFiles.includes(name)) {
-      loaded.object.traverse(object => { if (object.isMesh) object.geometry.dispose(); });
-      return { object: makePhantom(), source: 'phantom' };
-    }
-    return loaded;
-  };
-  const [bone, brain] = await Promise.all([
-    load('skull.glb', boneShader, () => generatePhantomSkull(boneShader)),
-    load('brain.glb', brainShader, () => generatePhantomBrain(brainShader, fluidShader)),
-  ]);
-  const skullGroup = bone.object;
-  const brainGroup = brain.object;
-  brainGroup.traverse(object => { if (object.isMesh) object.renderOrder = 1; });
-  skullGroup.traverse(object => { if (object.isMesh) object.renderOrder = 2; });
+  const skullGroup = new Group();
+  const brainGroup = new Group();
   anatomy.add(brainGroup, skullGroup);
+  const directory = new URL(base + 'assets/', document.baseURI);
+  const models = [
+    { name: 'skull.glb', group: skullGroup, material: boneShader, makePhantom: () => generatePhantomSkull(boneShader) },
+    { name: 'brain.glb', group: brainGroup, material: brainShader, makePhantom: () => generatePhantomBrain(brainShader, fluidShader) },
+  ];
 
   const headPose = createHeadPose();
   const orbit = createPreviewOrbit();
@@ -112,8 +105,7 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
   const materials = createModelMaterials(skullGroup, brainGroup, {
     headSpace: { value: inverseHead }, aperture: { value: aperture }, clipHalf,
   });
-  const modelLabels = createModelLabels(labels, labelCard, anatomy);
-  modelLabels.setOnChange(onSelection);
+  let modelLabels;
   const updatePlanes = attachSlicePlanes(anatomy);
   const calibrationDepth = new Vector3();
   const raycaster = new Raycaster();
@@ -129,6 +121,49 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
   let map;
   let frameWidth;
   let frameHeight;
+
+  async function loadModels(metadata, { onProgress, ...options }) {
+    const pending = models.filter(model => !model.source || model.source === 'fallback');
+    const transfers = new Map(pending.map(model => [model.name, { received: 0, total: 0 }]));
+    const results = await Promise.all(pending.map(async model => {
+      if (!available.includes(model.name) ||
+          (Array.isArray(metadata?.meshFiles) && !metadata.meshFiles.includes(model.name))) {
+        transfers.delete(model.name);
+        return { object: model.makePhantom(), source: 'phantom' };
+      }
+      return loadGeometry(directory, model, {
+        ...options,
+        progress(received, total) {
+          transfers.set(model.name, { received, total });
+          const downloads = [...transfers.values()];
+          onProgress(downloads.reduce((sum, item) => sum + item.received, 0),
+            downloads.every(item => item.total) ? downloads.reduce((sum, item) => sum + item.total, 0) : 0);
+        },
+      });
+    }));
+    if (options.signal?.aborted) throw options.signal.reason;
+
+    let changed = false;
+    for (const [index, model] of pending.entries()) {
+      const { object, source } = results[index];
+      if (model.source === 'fallback' && source === 'fallback') {
+        object.traverse(part => { if (part.isMesh) part.geometry.dispose(); });
+        continue;
+      }
+      const isBone = model.group === skullGroup;
+      model.group.traverse(part => { if (part.isMesh) part.geometry.dispose(); });
+      model.group.clear().add(object);
+      object.traverse(part => { if (part.isMesh) part.renderOrder = isBone ? 2 : 1; });
+      materials.setGroup(model.group, isBone);
+      model.source = source;
+      changed = true;
+    }
+    if (changed) {
+      modelLabels?.dispose();
+      modelLabels = createModelLabels(labels, labelCard, anatomy);
+      modelLabels.setOnChange(onSelection);
+    }
+  }
 
   function resize(nextRatio) {
     const nextWidth = canvas.clientWidth;
@@ -200,11 +235,11 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
       ring.style.setProperty('--lens-diameter', radius * 2 + 'px');
     }
     updatePlanes(options);
-    modelLabels.update({
+    modelLabels?.update({
       enabled: options.showLabels, visible: head.visible, layer, world: anatomy.matrixWorld, camera,
       width, height, half, lens, cursor, radius,
     });
-    materials.update({ mode: options.renderMode, opacity, layer, lens, selected: modelLabels.selectedMeshes, viewAxisHead });
+    materials.update({ mode: options.renderMode, opacity, layer, lens, selected: modelLabels?.selectedMeshes, viewAxisHead });
     renderer.render(scene, camera);
   }
 
@@ -219,10 +254,12 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
 
   return {
     draw,
+    loadModels,
     setFrame,
     dragPreview: orbit.drag,
     setPointer(value) { pointer = value; },
     pick(x, y) {
+      if (!modelLabels) return;
       if (!pickState || !head.visible || !pickState.opacity || x < 0 || x > width || y < 0 || y > height ||
           (pickState.lens && Math.hypot(x - pickState.cursor.x, y - pickState.cursor.y) > pickState.radius)) {
         modelLabels.close();
@@ -232,7 +269,7 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
       raycaster.setFromCamera(ndc, camera);
       modelLabels.selectMesh(pickAnatomy(raycaster, materials.parts, pickState));
     },
-    clearSelection: modelLabels.close,
-    modelSources: [bone.source, brain.source],
+    clearSelection(...args) { modelLabels?.close(...args); },
+    get modelSources() { return models.map(model => model.source); },
   };
 }

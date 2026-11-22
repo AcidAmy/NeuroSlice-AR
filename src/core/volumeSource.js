@@ -1,5 +1,5 @@
 import { readAssetJson, readBinary, readCompressedOrRaw } from './staticAssets.js';
-import { previewDimensions } from './volumePreview.js';
+import { MAX_PREVIEW_DIMENSION, previewDimensions } from './volumePreview.js';
 
 const seriesFormats = [
   ['meta.json', 'ct_volume.bin', 'mri_volume.bin'],
@@ -58,21 +58,24 @@ export function volumeFormats(available) {
   return seriesFormats.filter(([metadata, ct]) => available.includes(metadata) && available.includes(ct));
 }
 
-export async function loadVolumeMetadata(base, [name]) {
-  const metadata = await readAssetJson(base + 'assets/' + name, { priority: 'high' });
+export async function loadVolumeMetadata(base, [name], options) {
+  const metadata = await readAssetJson(base + 'assets/' + name, { ...options, priority: 'high' });
   if (metadata.version !== 1) throw new Error('体数据版本无效');
   voxelCount(metadata.dimensions);
   if (metadata.spacing !== undefined && !validSpacing(metadata.spacing)) throw new Error('体素间距无效');
   return metadata;
 }
 
-export async function loadVolumePreview(base, metadata) {
+export async function loadVolumePreview(base, metadataPromise, options) {
+  const download = readCompressedOrRaw(base + 'assets/volume-preview.bin', {
+    ...options, preferGzip: true, limit: MAX_PREVIEW_DIMENSION ** 3 * 3, priority: 'high', idle: 20000,
+  });
+  const [bytes, metadata] = await Promise.all([download, metadataPromise]);
+  if (!metadata) return null;
   const dimensions = previewDimensions(metadata.dimensions);
   const ctLength = voxelCount(dimensions) * 2;
   const hasMri = !ctOnly(metadata);
-  const bytes = await readBinary(base + 'assets/volume-preview.bin.gz', {
-    gzip: true, expected: hasMri ? ctLength * 1.5 : ctLength, priority: 'high', idle: 4000, timeout: 6000,
-  });
+  if (bytes.byteLength !== (hasMri ? ctLength * 1.5 : ctLength)) throw new Error('预览体素数与尺寸不一致');
   const spacing = metadata.spacing?.map((value, axis) =>
     value * (metadata.dimensions[axis] - 1) / (dimensions[axis] - 1));
   const series = decodeVolumePair(dimensions, bytes.slice(0, ctLength), hasMri ? bytes.slice(ctLength) : null,
@@ -80,61 +83,53 @@ export async function loadVolumePreview(base, metadata) {
   return { ...series, preview: true };
 }
 
-async function loadExtraSequences(base, available, series, signal) {
+async function loadExtraSequences(base, available, series, options) {
   const names = { t1: 'mri_t1.u8', t2: 'mri_t2.u8' };
-  await Promise.all(Object.entries(names).map(async ([key, filename]) => {
-    if (!available.includes(filename)) return;
+  for (const [key, filename] of Object.entries(names)) {
+    if (!available.includes(filename)) continue;
     try {
-      const bytes = await readBinary(base + 'assets/' + filename, { expected: series.mri.byteLength, signal });
+      const bytes = await readBinary(base + 'assets/' + filename, { ...options, expected: series.mri.byteLength, idle: 30000 });
       series.mriSequences[key] = new Uint8Array(bytes);
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       // 单个附加序列缺失时仍可以使用主序列。
     }
-  }));
-}
-
-async function loadVolumeSeries(base, available, [metadataName, ctName, mriName], metadata, onProgress) {
-  const controller = new AbortController();
-  const count = voxelCount(metadata.dimensions);
-  const hasMri = !ctOnly(metadata);
-  const transfers = Array.from({ length: hasMri ? 2 : 1 }, () => ({ received: 0, total: 0 }));
-  const load = (name, index, expected) => readCompressedOrRaw(base + 'assets/' + name, {
-    preferGzip: metadataName === 'meta.json' && import.meta.env?.PROD,
-    priority: 'low', signal: controller.signal, timeout: 90000, expected,
-    progress(received, total) {
-      transfers[index] = { received, total };
-      onProgress(
-        transfers.reduce((sum, entry) => sum + entry.received, 0),
-        transfers.every(entry => entry.total) ? transfers.reduce((sum, entry) => sum + entry.total, 0) : 0,
-      );
-    },
-  });
-  onProgress(0, 0);
-  try {
-    const [ct, mri] = await Promise.all([load(ctName, 0, count * 2), hasMri ? load(mriName, 1, count) : null]);
-    const series = decodeVolumePair(metadata.dimensions, ct, mri, metadata);
-    if (mri) await loadExtraSequences(base, available, series, controller.signal);
-    return series;
-  } finally {
-    controller.abort();
   }
 }
 
+async function loadVolumeSeries(base, available, [metadataName, ctName, mriName], metadata, onProgress, options) {
+  const count = voxelCount(metadata.dimensions);
+  const load = (name, modality, expected) => readCompressedOrRaw(base + 'assets/' + name, {
+    ...options,
+    preferGzip: metadataName === 'meta.json' && import.meta.env?.PROD,
+    priority: 'low', idle: 30000, expected,
+    progress: (received, total) => onProgress(received, total, modality),
+  });
+  onProgress(0, 0, 'CT');
+  const ct = await load(ctName, 'CT', count * 2);
+  if (!ctOnly(metadata)) onProgress(0, 0, 'MRI');
+  const mri = ctOnly(metadata) ? null : await load(mriName, 'MRI', count);
+  const series = decodeVolumePair(metadata.dimensions, ct, mri, metadata);
+  if (mri) await loadExtraSequences(base, available, series, options);
+  return series;
+}
+
 export async function loadVolumePair(base, available, {
-  firstMetadata, onMetadata = () => {}, onProgress = () => {}, hasPreview = () => false,
+  firstMetadata, onProgress = () => {}, hasPreview = () => false, ...options
 } = {}) {
   const formats = volumeFormats(available);
   for (const [index, format] of formats.entries()) {
     try {
       const metadata = index === 0 && firstMetadata
-        ? await firstMetadata : await loadVolumeMetadata(base, format);
+        ? await firstMetadata : await loadVolumeMetadata(base, format, options);
       if (!metadata) continue;
-      await onMetadata(metadata, format);
-      return await loadVolumeSeries(base, available, format, metadata, onProgress);
-    } catch {
+      return await loadVolumeSeries(base, available, format, metadata, onProgress, options);
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       // 另一代资产协议仍可能可用。
     }
   }
+  if (options.signal?.aborted) throw options.signal.reason;
   return hasPreview() ? null : loadPhantom(formats.length > 0);
 }
 

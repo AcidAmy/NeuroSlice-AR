@@ -74,8 +74,11 @@
           <p class="model-label-location"></p>
           <p class="model-label-notes"></p>
         </aside>
-        <p class="viewport-feedback" id="projection-loading" role="status">正在加载 3D 模型</p>
-        <p class="viewport-feedback" id="projection-error" hidden>当前浏览器无法显示 WebGL 透视。右侧断层预览仍可使用。</p>
+        <div class="viewport-feedback" id="projection-feedback">
+          <p id="projection-loading" role="status">断层预览后加载 3D 颅脑</p>
+          <progress id="projection-progress" max="100" aria-label="3D 模型下载进度" hidden></progress>
+          <button type="button" id="retry-projection" class="control-button" hidden>重试</button>
+        </div>
       </div>
       <div class="ar-toolbar ar-toolbar-bottom">
         <button type="button" class="control-button feature-toggle" id="toggle-scan-line" aria-pressed="true"><span class="toggle-indicator" aria-hidden="true"></span>3D 切面</button>
