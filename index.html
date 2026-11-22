@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0B0D12">
+  <meta name="description" content="颅脑多模态断层交互系统">
+  <title>NeuroSlice AR</title>
+  <link rel="icon" type="image/svg+xml" href="./branding/neuroslice.svg">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+  <header class="workbar">
+    <div class="workbar-inner">
+      <div class="identity">
+        <img src="./branding/neuroslice.svg" alt="" width="23" height="23">
+        <h1>NeuroSlice <span>AR</span></h1>
+        <span class="source-badge" id="workstation-source" role="status" hidden>部分影像为占位数据</span>
+      </div>
+      <p class="quiz-intro" id="quiz-intro" hidden>用滚轮或切层轨道找到目标层面，再提交定位。</p>
+      <div class="work-actions">
+        <div class="segments mode-picker" role="group" aria-label="工作模式">
+          <button type="button" data-mode="lesson" aria-pressed="true">教学浏览</button>
+          <button type="button" data-mode="quiz" aria-pressed="false" title="在限时内找到指定解剖层面">自我测试</button>
+        </div>
+        <div class="fps-meter numeric" aria-label="摄像头帧率"><span class="status-point" aria-hidden="true"></span><output id="fps-value" aria-live="off">—</output><span>FPS</span></div>
+        <button type="button" class="control-button" id="open-calibration" aria-haspopup="dialog">校准</button>
+        <button type="button" class="control-button primary-button" id="camera-action">启动摄像头</button>
+      </div>
+    </div>
+  </header>
+  <div id="tracker-progress" class="tracker-progress" hidden aria-hidden="true"><div id="tracker-progress-fill"></div></div>
+
+  <main class="workspace">
+    <section class="station ar-station" aria-labelledby="ar-caption">
+      <div class="station-heading">
+        <h2 id="ar-caption">WebAR 透视定位</h2>
+      </div>
+      <div class="ar-toolbar ar-toolbar-top">
+        <div class="tool-block">
+          <span class="control-label">图层</span>
+          <div class="segments" role="group" aria-label="透视图层">
+            <button type="button" data-ar-layer="skull" aria-pressed="false">颅骨</button>
+            <button type="button" data-semantic="mri" data-ar-layer="brain" aria-pressed="false">大脑</button>
+            <button type="button" data-ar-layer="combined" aria-pressed="true">联合</button>
+          </div>
+        </div>
+        <div class="tool-block">
+          <span class="control-label">视图</span>
+          <div class="segments" role="group" aria-label="透视视图">
+            <button type="button" data-ar-view="full" aria-pressed="true">全头</button>
+            <button type="button" data-ar-view="half" aria-pressed="false">半剖</button>
+            <button type="button" data-ar-view="lens" aria-pressed="false">指尖镜窗</button>
+          </div>
+        </div>
+        <div class="segments" role="group" aria-label="模型渲染模式">
+          <button type="button" data-ar-render="specimen" data-semantic="sagittal" aria-pressed="true">解剖标本</button>
+          <button type="button" data-ar-render="xray" aria-pressed="false">X光透视</button>
+        </div>
+      </div>
+      <div class="ar-viewport" id="ar-viewport">
+        <video id="camera-input" playsinline muted hidden></video>
+        <canvas class="camera-image" id="camera-image" hidden aria-hidden="true"></canvas>
+        <canvas class="projection-image" id="projection-image" aria-label="颅脑三维透视"></canvas>
+        <div class="viewport-marks" aria-hidden="true"></div>
+        <div class="lens-guide" id="lens-guide" hidden aria-hidden="true"></div>
+        <div class="model-labels" id="model-labels" hidden></div>
+        <aside class="model-label-card" id="model-label-card" aria-labelledby="model-label-name" aria-live="polite" hidden>
+          <header>
+            <div><h3 id="model-label-name"></h3><p lang="en"></p></div>
+            <button type="button" aria-label="关闭 3D 教学卡片">×</button>
+          </header>
+          <p class="model-label-location"></p>
+          <p class="model-label-notes"></p>
+        </aside>
+        <p class="viewport-feedback" id="projection-error" hidden>当前浏览器无法显示 WebGL 透视。右侧断层预览仍可使用。</p>
+      </div>
+      <div class="ar-toolbar ar-toolbar-bottom">
+        <button type="button" class="control-button feature-toggle" id="toggle-scan-line" aria-pressed="true"><span class="toggle-indicator" aria-hidden="true"></span>3D 切面</button>
+        <button type="button" class="control-button feature-toggle" id="toggle-model-labels" data-semantic="coronal" aria-pressed="false" aria-controls="model-labels"><span class="toggle-indicator" aria-hidden="true"></span>3D 标签</button>
+        <button type="button" class="control-button feature-toggle" id="toggle-all-planes" aria-pressed="false"><span class="toggle-indicator" aria-hidden="true"></span>三面同显</button>
+        <label class="opacity-control" for="projection-opacity">
+          <span>透视强度</span><input type="range" id="projection-opacity" min="0" max="100" value="82"><output id="opacity-value" for="projection-opacity">82%</output>
+        </label>
+      </div>
+      <p class="station-footer" id="tracking-status" role="status">启动摄像头后，透视模型会跟随头部。</p>
+    </section>
+
+    <section class="station imaging-station" aria-labelledby="imaging-caption">
+      <div class="station-heading">
+        <h2 id="imaging-caption">多模态断层</h2>
+      </div>
+      <div class="quiz-panel" id="quiz-panel" hidden>
+        <div class="quiz-heading"><strong id="quiz-target">加载题库后开始</strong><output id="quiz-time" aria-live="off">15 秒</output></div>
+        <p id="quiz-hint"></p>
+        <p id="quiz-result" class="quiz-result numeric" role="status" hidden></p>
+        <div class="quiz-actions">
+          <button type="button" class="control-button primary-button" id="quiz-submit" disabled>提交定位</button>
+          <button type="button" class="control-button" id="quiz-next" disabled>下一题</button>
+          <span id="quiz-record" class="numeric"></span>
+        </div>
+      </div>
+      <div class="mpr-toolbar">
+        <div class="segments" role="group" aria-label="断层布局">
+          <button type="button" data-mpr-layout="mpr" aria-pressed="true">三视图</button>
+          <button type="button" data-mpr-layout="axial" data-semantic="axial" aria-pressed="false">轴位详查</button>
+          <button type="button" data-mpr-layout="coronal" data-semantic="coronal" aria-pressed="false">冠位详查</button>
+          <button type="button" data-mpr-layout="sagittal" data-semantic="sagittal" aria-pressed="false">矢位详查</button>
+        </div>
+        <div class="mpr-options">
+          <button type="button" id="toggle-annotations" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>标注点</button>
+          <div class="frame-readout numeric">
+            <output id="ct-overlay" aria-label="当前 CT 窗宽窗位">W 80 / L 40</output>
+            <output id="mri-overlay" data-semantic="mri" aria-label="当前 MRI 序列">T1WI</output>
+          </div>
+        </div>
+      </div>
+      <div class="scan-pair mpr-grid" id="scan-pair" data-layout="mpr"></div>
+      <div class="imaging-controls">
+        <div class="slice-controls" id="slice-controls" data-semantic="axial">
+          <div class="slice-caption">
+            <span class="plane-readout" id="active-plane">横断面</span>
+            <span class="annotation-layer" id="annotation-layer" aria-live="polite" hidden></span>
+            <span class="slice-lock" id="slice-lock" data-semantic="coronal" role="status" hidden>切片已锁定</span>
+          </div>
+          <input id="slice-index" type="range" min="0" max="119" value="77" disabled>
+          <output id="slice-number" for="slice-index">—</output>
+          <button type="button" id="slice-back" class="control-button numeric" aria-label="上一层" disabled>−</button>
+          <button type="button" id="slice-forward" class="control-button numeric" aria-label="下一层" disabled>+</button>
+          <div class="slice-endpoints" aria-hidden="true"><span id="slice-start">足侧</span><span id="slice-end">头顶</span></div>
+        </div>
+        <div class="tone-grid">
+          <section class="tone-control" aria-labelledby="ct-controls-heading">
+            <h3 id="ct-controls-heading">CT 调窗</h3>
+            <div class="segments tone-presets" role="group" aria-label="CT 调窗预设">
+              <button type="button" data-ct-window="brain" aria-pressed="true">脑窗 <span class="numeric">80/40</span></button>
+              <button type="button" data-semantic="sagittal" data-ct-window="bone" aria-pressed="false">骨窗 <span class="numeric">2000/400</span></button>
+              <button type="button" data-ct-window="subdural" aria-pressed="false">软组织 <span class="numeric">300/50</span></button>
+            </div>
+            <label class="tone-slider">窗宽 W <input id="ct-width" type="range" min="1" max="4096" value="80"><output id="ct-width-value" for="ct-width">80</output></label>
+            <label class="tone-slider">窗位 L <input id="ct-level" type="range" min="-1024" max="3071" value="40"><output id="ct-level-value" for="ct-level">40</output></label>
+          </section>
+          <section class="tone-control" data-semantic="mri" aria-labelledby="mri-controls-heading">
+            <h3 id="mri-controls-heading">MRI 对比</h3>
+            <div class="segments tone-presets numeric" data-semantic="mri" role="group" aria-label="MRI 序列预设">
+              <button type="button" data-mri-preset="t1" aria-pressed="true">T1WI</button>
+              <button type="button" data-mri-preset="t2" aria-pressed="false">T2WI</button>
+            </div>
+            <label class="tone-slider">对比度 <input id="mri-contrast" type="range" min="50" max="200" value="100"><output id="mri-contrast-value" for="mri-contrast">100%</output></label>
+            <label class="tone-slider">亮度 <input id="mri-brightness" type="range" min="-80" max="80" value="0"><output id="mri-brightness-value" for="mri-brightness">0</output></label>
+          </section>
+        </div>
+        <section class="slice-presets" id="slice-preset-shelf" aria-labelledby="slice-presets-heading" hidden>
+          <h3 id="slice-presets-heading">经典轴位预设</h3>
+          <div class="preset-grid" id="slice-presets"></div>
+        </section>
+      </div>
+      <p class="station-footer numeric" id="slice-gesture-status">指尖上下移动可切层，捏合 0.2 秒锁定。也可使用滚轮或滑块。</p>
+    </section>
+  </main>
+
+  <footer class="work-footer">
+    <div>仅供医学教学与科研演示，不作临床诊断依据<span aria-hidden="true"> · </span><button type="button" id="open-credits" aria-haspopup="dialog">数据来源与致谢</button></div>
+  </footer>
+
+  <dialog class="work-dialog anatomy-detail" id="anatomy-detail" aria-labelledby="anatomy-name">
+    <header class="dialog-heading"><h3 id="anatomy-name" tabindex="-1"></h3><button type="button" class="control-button" id="close-anatomy">关闭</button></header>
+    <p id="anatomy-description"></p>
+    <p id="anatomy-clinical"></p>
+  </dialog>
+
+  <dialog class="work-dialog credits" id="credits-panel" aria-labelledby="credits-caption">
+    <form method="dialog">
+      <header class="dialog-heading"><h2 id="credits-caption">数据来源与致谢</h2><button type="submit" class="control-button">关闭</button></header>
+      <dl>
+        <dt><a href="https://github.com/wasserth/TotalSegmentator" target="_blank" rel="noreferrer">TotalSegmentator</a></dt>
+        <dd>离线分割工具。项目代码采用 Apache-2.0，权重按所用任务和版本的条款使用。</dd>
+        <dt><a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html" target="_blank" rel="noreferrer">BodyParts3D 4.0</a></dt>
+        <dd>BodyParts3D, © The Database Center for Life Science (DBCLS), licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>。分骨与分脑网格经过抽稀，并基于 TotalSegmentator 患者分割靶标完成 ICP 空间配准，用于解剖结构教学可视化。</dd>
+        <dt><a href="https://github.com/google-deepmind/tcia-ct-scan-dataset" target="_blank" rel="noreferrer">CT · Head-Neck Cetuximab 0522c0017</a></dt>
+        <dd>TCIA RTOG 0522，采用 Google DeepMind 与 UCLH 的公开 NRRD 版本，CC BY 4.0。CT 用于断层显示和三维图谱的空间配准。</dd>
+        <dt><a href="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/cc211f0dfd9a05ca3841ce1141b292898b2dd2d3f08286affadf823a7e58df93" target="_blank" rel="noreferrer">T1 MRI · 3D Slicer MRHead</a></dt>
+        <dd>由影像中的本人捐赠并授权无使用限制。MRI 来自另一位受试者，经仿射配准后用于教学对照。</dd>
+        <dt><a href="https://github.com/google-ai-edge/mediapipe" target="_blank" rel="noreferrer">MediaPipe Tasks Vision</a></dt>
+        <dd>浏览器内人脸和手部追踪。运行时采用 Apache-2.0，模型条款见其任务模型卡。</dd>
+        <dt><a href="https://github.com/mrdoob/three.js/blob/r160/LICENSE" target="_blank" rel="noreferrer">Three.js</a></dt>
+        <dd>WebGL 绘制与 GLB 加载，MIT 许可。</dd>
+        <dt><a href="./fonts/OFL.txt" target="_blank" rel="noreferrer">IBM Plex Sans / Mono</a></dt>
+        <dd>IBM 开放字体，SIL Open Font License 1.1。</dd>
+      </dl>
+    </form>
+  </dialog>
+
+  <dialog id="calibration-panel" class="calibration" aria-labelledby="calibration-caption">
+    <form method="dialog" class="calibration-body">
+      <header class="dialog-heading">
+        <h2 id="calibration-caption">透视校准</h2>
+        <button type="submit" class="control-button" aria-label="关闭校准">关闭</button>
+      </header>
+      <div><label for="align-scale">整体缩放</label><output for="align-scale" id="value-scale">100%</output><input type="range" id="align-scale" min="65" max="150" step="0.5" value="100"></div>
+      <div><label for="align-scale-x">水平宽窄 (X)</label><output for="align-scale-x" id="value-scale-x">100%</output><input type="range" id="align-scale-x" min="80" max="120" step="0.5" value="100"></div>
+      <div><label for="align-scale-y">垂直高矮 (Y)</label><output for="align-scale-y" id="value-scale-y">100%</output><input type="range" id="align-scale-y" min="80" max="120" step="0.5" value="100"></div>
+      <div><label for="align-y">上下偏移</label><output for="align-y" id="value-y">0%</output><input type="range" id="align-y" min="-20" max="20" step="0.5" value="0" title="正值向上"></div>
+      <div><label for="align-z">深度偏移</label><output for="align-z" id="value-z">0%</output><input type="range" id="align-z" min="-35" max="35" step="0.5" value="0" title="正值向头内，转动时可见贴合变化"></div>
+      <div><label for="align-x">水平偏移</label><output for="align-x" id="value-x">0%</output><input type="range" id="align-x" min="-20" max="20" step="0.5" value="0" title="正值向屏幕右侧"></div>
+      <button type="button" id="reset-calibration" class="control-button">重置默认</button>
+      <details class="measure-panel" id="measure-panel">
+        <summary>性能与防抖监测</summary>
+        <dl>
+          <dt>平均渲染 FPS</dt><dd id="measure-fps">—</dd>
+          <dt>追踪 + 渲染耗时</dt><dd id="measure-cost">—</dd>
+          <dt>指尖 Y 标准差（原始 / EMA）</dt><dd id="measure-jitter">—</dd>
+          <dt>抖动抑制率</dt><dd id="measure-suppression">—</dd>
+        </dl>
+        <p>最近 <span class="numeric">5</span> 秒。测抖动时请保持指尖静止。</p>
+        <button type="button" class="control-button" id="copy-measures">复制 JSON</button>
+        <span role="status" id="copy-measure-status"></span>
+      </details>
+    </form>
+  </dialog>
+  <script type="module" src="./src/app/workstation.js"></script>
+</body>
+</html>

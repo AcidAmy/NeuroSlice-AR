@@ -1,0 +1,15 @@
+{
+  "id": "./neuroslice-ar",
+  "name": "NeuroSlice AR",
+  "short_name": "NeuroSlice AR",
+  "description": "颅脑多模态断层医学教学工作站",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B0D12",
+  "theme_color": "#0B0D12",
+  "icons": [
+    { "src": "./branding/neuroslice.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

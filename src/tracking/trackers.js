@@ -1,0 +1,51 @@
+// MediaPipe face and hand trackers. Both run in the browser (WebAssembly + WebGL).
+// The runtime and models are served from this site when present (see scripts/setup-assets.mjs);
+// otherwise they are loaded from the published MediaPipe model and runtime URLs.
+import { FilesetResolver, FaceLandmarker, HandLandmarker } from "@mediapipe/tasks-vision";
+import { fetchBytes, embedded } from "../net.js";
+
+const BASE = import.meta.env.BASE_URL;
+const REMOTE_WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const REMOTE_MODELS = "https://storage.googleapis.com/mediapipe-models/";
+const FACE_REMOTE = REMOTE_MODELS + "face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const HAND_REMOTE = REMOTE_MODELS + "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+// Is this file really on our own server? (Dev servers answer missing files with the HTML page, so check the type.)
+async function hasLocal(url) {
+  try {
+    const r = await fetch(url, { method: "HEAD" });
+    return r.ok && !(r.headers.get("content-type") || "").includes("text/html");
+  } catch (e) { return false; }
+}
+
+export const trackers = { face: null, hand: null, source: "" };
+let loading = null;
+
+// onProgress(fraction 0..1) follows the download of the two tracker models (about 11.6 MB together).
+export function loadTrackers(onProgress) {
+  return loading || (loading = load(onProgress).catch(e => { loading = null; throw e; }));
+}
+
+async function load(onProgress) {
+  const [wasmLocal, faceLocal, handLocal] = await Promise.all([
+    hasLocal(BASE + "wasm/vision_wasm_internal.wasm"), hasLocal(BASE + "models/face_landmarker.task"), hasLocal(BASE + "models/hand_landmarker.task")]);
+  // An embedded runtime and detector bundle can be supplied by the host.
+  const inJs = embedded("wasm-js"), inWasm = inJs && embedded("wasm-bin"), inFace = embedded("face"), inHand = embedded("hand");
+  const blob = (bytes, type) => URL.createObjectURL(new Blob([bytes], { type }));
+  const files = inWasm ? { wasmLoaderPath: blob(inJs, "text/javascript"), wasmBinaryPath: blob(inWasm, "application/wasm") }
+                       : await FilesetResolver.forVisionTasks(wasmLocal ? BASE + "wasm" : REMOTE_WASM);
+  const faceModel = faceLocal ? BASE + "models/face_landmarker.task" : FACE_REMOTE;
+  const handModel = handLocal ? BASE + "models/hand_landmarker.task" : HAND_REMOTE;
+  trackers.source = (inWasm && inFace && inHand) ? "embedded" : (wasmLocal && faceLocal && handLocal) ? "local" : "online";
+  const got = [0, 0], size = [3758596, 7819105];          // sizes are only a first guess until the server reports them
+  const report = i => (g, total) => { got[i] = g; if (total) size[i] = total; if (onProgress) onProgress((got[0] + got[1]) / (size[0] + size[1])); };
+  const [faceBytes, handBytes] = await Promise.all([inFace || fetchBytes(faceModel, report(0)), inHand || fetchBytes(handModel, report(1))]);
+  const mkFace = d => FaceLandmarker.createFromOptions(files, { baseOptions: { modelAssetBuffer: faceBytes, delegate: d },
+    runningMode: "VIDEO", numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: true });
+  const mkHand = d => HandLandmarker.createFromOptions(files, { baseOptions: { modelAssetBuffer: handBytes, delegate: d },
+    runningMode: "VIDEO", numHands: 2 });
+  try { trackers.face = await mkFace("GPU"); } catch (e) { trackers.face = await mkFace("CPU"); }
+  try { try { trackers.hand = await mkHand("GPU"); } catch (e) { trackers.hand = await mkHand("CPU"); } }
+  catch (e) { trackers.hand = null; }                      // the head view still works without hand tracking
+  return trackers;
+}

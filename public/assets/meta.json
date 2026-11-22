@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "dimensions": [
+    224,
+    224,
+    192
+  ],
+  "spacing": [
+    1.175392670157068,
+    1.175392670157068,
+    1.175392670157068
+  ],
+  "spacingUnit": "mm",
+  "originLpsMm": [
+    -128.60627719120205,
+    226.43372181697666,
+    -1010.25
+  ],
+  "orientation": "LPS",
+  "modalities": [
+    "CT",
+    "MRI"
+  ],
+  "ctWindow": {
+    "width": 80,
+    "level": 40
+  },
+  "ctHuRange": [
+    -1024,
+    1733
+  ],
+  "mriSequence": "t1",
+  "mriRelation": "cross-subject",
+  "registration": {
+    "method": "Euler3D initialization + affine / Mattes mutual information",
+    "fixedCtToMovingMriParameters": [
+      1.0565045925307355,
+      0.0017525188569182273,
+      -0.03393831131676149,
+      -0.015319136668018032,
+      1.0340075325558757,
+      -0.1443687464240239,
+      0.02741965849383293,
+      0.09774916936053053,
+      1.005482594800758,
+      -0.0969964564331581,
+      -351.5175569261661,
+      884.6306590509555
+    ],
+    "fixedParameters": [
+      2.450005531311035,
+      357.49000453948975,
+      -898.0
+    ],
+    "metric": -0.25945288025333657,
+    "stopCondition": "RegularStepGradientDescentOptimizerv4: Maximum number of iterations (240) exceeded.",
+    "mriGridCoverage": 0.5566477872887436
+  },
+  "meshFaceCounts": {
+    "skull": 19971,
+    "brain": 19990
+  },
+  "meshChecks": {
+    "skull": {
+      "inputFaces": 363560,
+      "faceCount": 19971,
+      "boundsHead": [
+        [
+          -0.6181975069065245,
+          -0.8813501635017651,
+          -0.8800383552546819
+        ],
+        [
+          0.6182813690133192,
+          0.8800648435029573,
+          0.8783357388350476
+        ]
+      ],
+      "sizeMm": [
+        138.79475382200246,
+        197.7188345362801,
+        197.37749206157213
+      ],
+      "orientation": "X=Left, Y=Superior, Z=Anterior",
+      "vertexNormals": true,
+      "inputs": [
+        "skull.nii.gz",
+        "mandible.nii.gz"
+      ]
+    },
+    "brain": {
+      "inputFaces": 135308,
+      "faceCount": 19990,
+      "boundsHead": [
+        [
+          -0.5662920308076458,
+          -0.40990062079415923,
+          -0.7767870197132813
+        ],
+        [
+          0.5661939411914004,
+          0.7653456199419294,
+          0.6504246384195964
+        ]
+      ],
+      "sizeMm": [
+        127.12155035689293,
+        131.92139052262596,
+        160.20450862541554
+      ],
+      "orientation": "X=Left, Y=Superior, Z=Anterior",
+      "vertexNormals": true,
+      "inputs": [
+        "brain.nii.gz"
+      ]
+    }
+  },
+  "meshFiles": [
+    "skull.glb",
+    "brain.glb"
+  ]
+}

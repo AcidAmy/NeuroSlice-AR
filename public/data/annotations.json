@@ -1,0 +1,69 @@
+[
+  {
+    "id": "centrum-semiovale",
+    "title": "半卵圆中心",
+    "landmarkLabel": "上额",
+    "sliceRatio": 0.76,
+    "surfaceLandmark": "额部上段至头顶方向",
+    "structures": [
+      { "name": "半卵圆中心", "x": 0.63, "y": 0.49, "description": "位于侧脑室体部以上、皮质深面的大片半球白质，含向皮层放射的纤维束。", "clinicalNote": "教学读片可比较双侧深部白质的对称性与信号变化。" },
+      { "name": "皮质灰质", "x": 0.34, "y": 0.47, "description": "沿大脑半球表面分布的灰质，随脑回与脑沟形成起伏。", "clinicalNote": "观察皮质与邻近白质的分界，区分真实组织边缘与容积平均效应。" },
+      { "name": "大脑纵裂", "x": 0.50, "y": 0.41, "description": "分隔左右大脑半球的正中裂隙，内可见大脑镰所在平面。", "clinicalNote": "纵裂与大脑镰有助于建立轴位图像的正中参照。" }
+    ],
+    "quizQuestion": "向头顶方向移动，寻找侧脑室上方的大片白质。"
+  },
+  {
+    "id": "lateral-ventricle-body",
+    "title": "侧脑室体部",
+    "landmarkLabel": "额部",
+    "sliceRatio": 0.65,
+    "surfaceLandmark": "眉间上方额部附近",
+    "structures": [
+      { "name": "右侧脑室体部", "x": 0.43, "y": 0.50, "description": "侧脑室在顶叶深部延续的脑脊液腔，位于前角与三角区之间。", "clinicalNote": "结合相邻层面观察脑室在前后方向的连续性。" },
+      { "name": "左侧脑室体部", "x": 0.57, "y": 0.50, "description": "与对侧体部相对应的脑室腔，位于胼胝体和深部半球结构之间。", "clinicalNote": "比较双侧脑室形态时需考虑头部旋转和扫描层面。" },
+      { "name": "胼胝体体部", "x": 0.50, "y": 0.39, "description": "连接双侧半球的大束连合白质，构成侧脑室体部上方的主要结构。", "clinicalNote": "胼胝体整体形态可结合正中矢状位辨认。" }
+    ],
+    "quizQuestion": "从上部白质向下找，直到两侧成对的脑脊液腔出现。"
+  },
+  {
+    "id": "basal-ganglia",
+    "title": "基底节与内囊",
+    "landmarkLabel": "眉间",
+    "sliceRatio": 0.60,
+    "surfaceLandmark": "眉间与鼻尖之间",
+    "structures": [
+      { "name": "尾状核头", "x": 0.43, "y": 0.43, "description": "邻接侧脑室前角外侧壁的深部灰质，是纹状体的一部分。", "clinicalNote": "可借侧脑室前角和内囊前肢定位。" },
+      { "name": "豆状核", "x": 0.64, "y": 0.51, "description": "由壳核和苍白球组成，位于内囊外侧；轴位轮廓近似透镜形。", "clinicalNote": "豆状核轮廓是比较基底节层面对称性的常用参照。" },
+      { "name": "内囊后肢", "x": 0.57, "y": 0.55, "description": "位于豆状核与丘脑之间的白质束，包含下行运动纤维等传导通路。", "clinicalNote": "这一小区域聚集多条通路，定位练习应结合相邻结构。" },
+      { "name": "丘脑", "x": 0.46, "y": 0.59, "description": "位于第三脑室两侧的间脑灰质结构，参与多类感觉和运动信息的中继。", "clinicalNote": "以第三脑室和内囊后肢作为辨认丘脑的参照。" }
+    ],
+    "quizQuestion": "找出脑室旁深灰质与白质通路相邻的层面。"
+  },
+  {
+    "id": "suprasellar-midbrain",
+    "title": "鞍上池与中脑",
+    "landmarkLabel": "鼻根",
+    "sliceRatio": 0.52,
+    "surfaceLandmark": "鼻根至鼻尖方向",
+    "structures": [
+      { "name": "鞍上池", "x": 0.50, "y": 0.46, "description": "位于蝶鞍上方的蛛网膜下腔，邻近视交叉和垂体柄。", "clinicalNote": "池的形态会随头位和轴位层高变化，可结合邻层追踪。" },
+      { "name": "中脑", "x": 0.50, "y": 0.57, "description": "脑干上段，位于间脑与脑桥之间，两侧可辨大脑脚。", "clinicalNote": "在轴位上可利用脚间池与中脑周围脑池共同定位。" },
+      { "name": "环池", "x": 0.57, "y": 0.60, "description": "沿中脑外侧走行的蛛网膜下腔，向后与四叠体池相接。", "clinicalNote": "环池有助于在轴位图像上辨认中脑外侧边缘。" }
+    ],
+    "quizQuestion": "沿脑干向上寻找，留意脑干部前方和两侧的脑池。"
+  },
+  {
+    "id": "cerebellum-pons",
+    "title": "小脑与脑桥",
+    "landmarkLabel": "鼻尖下方",
+    "sliceRatio": 0.43,
+    "surfaceLandmark": "鼻尖下方至下颌的上段",
+    "structures": [
+      { "name": "脑桥", "x": 0.50, "y": 0.56, "description": "位于中脑与延髓之间的脑干段，在后颅窝居前方。", "clinicalNote": "脑桥与其后方的第四脑室可用来确认这一轴位层面。" },
+      { "name": "第四脑室", "x": 0.50, "y": 0.64, "description": "位于脑桥或延髓背侧、小脑腹侧的脑脊液腔。", "clinicalNote": "沿相邻层面可追踪脑室与中脑导水管的连接方向。" },
+      { "name": "小脑半球", "x": 0.63, "y": 0.69, "description": "位于后颅窝两侧、与中线小脑蚓相连，参与协调和运动调节。", "clinicalNote": "后颅窝的 CT 图像易受邻近骨质伪影影响，可用同层 MRI 辅助辨认。" },
+      { "name": "小脑蚓", "x": 0.50, "y": 0.74, "description": "位于两个小脑半球之间的正中结构，部分层面紧邻第四脑室背侧。", "clinicalNote": "可用第四脑室与小脑半球作为相对位置参照。" }
+    ],
+    "quizQuestion": "向足侧进入后颅窝，寻找前方脑干与后方小脑相对的层面。"
+  }
+]

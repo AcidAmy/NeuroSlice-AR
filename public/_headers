@@ -1,0 +1,14 @@
+/assets/*
+  Cache-Control: public, max-age=86400
+/models/*
+  Cache-Control: public, max-age=86400
+/wasm/*
+  Cache-Control: public, max-age=86400
+/sw.js
+  Cache-Control: no-cache
+/
+  Cache-Control: no-cache
+/*
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
