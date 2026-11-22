@@ -9,6 +9,7 @@ import { createXRayFresnelShader } from './xrayFresnelShader.js';
 import { attachSlicePlanes } from './slicePlanes.js';
 import { createModelLabels } from './labels3d.js';
 import { createModelMaterials } from './modelMaterials.js';
+import { readCompressedOrRaw } from '../core/staticAssets.js';
 
 export function setLayerVisibility(skullGroup, brainGroup, layer) {
   skullGroup.visible = layer === 'skull' || layer === 'combined';
@@ -19,9 +20,7 @@ async function loadGeometry(base, available, name, material, makePhantom) {
   if (available.includes(name)) {
     try {
       const directory = new URL(base + 'assets/', document.baseURI);
-      const response = await fetch(new URL(name, directory));
-      if (!response.ok) throw new Error('GLB 加载失败');
-      const bytes = await response.arrayBuffer();
+      const bytes = await readCompressedOrRaw(new URL(name, directory).href, { preferGzip: import.meta.env?.PROD });
       if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) {
         throw new Error('GLB 文件头无效');
       }
@@ -54,7 +53,7 @@ export function pickAnatomy(raycaster, meshes, { half, inverseHead }) {
     })?.object;
 }
 
-export async function createProjection({ canvas, ring, labels, labelCard, base, available, onSelection = () => {} }) {
+export async function createProjection({ canvas, ring, labels, labelCard, base, available, metadata, onSelection = () => {} }) {
   const contextOptions = { alpha: true, antialias: true };
   const context = canvas.getContext('webgl2', contextOptions) || canvas.getContext('webgl', contextOptions);
   if (!context) throw new Error('WebGL 不可用');
@@ -86,9 +85,17 @@ export async function createProjection({ canvas, ring, labels, labelCard, base, 
   const fluidShader = createXRayFresnelShader({
     tint: '#D9B3AE', rimTint: '#F6D2CC', shadowTint: '#7C3F44', density: 0.68, edgePower: 2.7, body: 0.26,
   });
+  const load = async (name, material, makePhantom) => {
+    const [loaded, info] = await Promise.all([loadGeometry(base, available, name, material, makePhantom), metadata]);
+    if (Array.isArray(info?.meshFiles) && !info.meshFiles.includes(name)) {
+      loaded.object.traverse(object => { if (object.isMesh) object.geometry.dispose(); });
+      return { object: makePhantom(), source: 'phantom' };
+    }
+    return loaded;
+  };
   const [bone, brain] = await Promise.all([
-    loadGeometry(base, available, 'skull.glb', boneShader, () => generatePhantomSkull(boneShader)),
-    loadGeometry(base, available, 'brain.glb', brainShader, () => generatePhantomBrain(brainShader, fluidShader)),
+    load('skull.glb', boneShader, () => generatePhantomSkull(boneShader)),
+    load('brain.glb', brainShader, () => generatePhantomBrain(brainShader, fluidShader)),
   ]);
   const skullGroup = bone.object;
   const brainGroup = brain.object;

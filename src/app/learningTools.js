@@ -1,5 +1,6 @@
 import { PLANES, projectVoxel } from '../core/mpr.js';
 import { layerForRatio, pickQuizTarget, QUIZ_DURATION_MS, scoreQuiz } from '../core/quiz.js';
+import { readAssetJson } from '../core/staticAssets.js';
 
 function validLayers(layers) {
   const text = value => typeof value === 'string' && value.trim().length > 0;
@@ -19,6 +20,7 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
   const annotationToggle = byId('toggle-annotations');
   const presetShelf = byId('slice-preset-shelf');
   const presetGrid = byId('slice-presets');
+  const retry = byId('retry-annotations');
   const presetButtons = new Map();
   const detail = byId('anatomy-detail');
   const quizPanel = byId('quiz-panel');
@@ -72,8 +74,9 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
   }
 
   function drawAnnotations() {
-    presetShelf.hidden = !series || quizMode || !layers.length;
-    annotationToggle.disabled = presetShelf.hidden;
+    presetShelf.hidden = quizMode || (!layers.length && !loadFailed);
+    annotationToggle.disabled = !series || !layers.length || quizMode;
+    for (const button of presetButtons.values()) button.disabled = !series;
     const showMarkers = !annotationToggle.disabled && (layout === 'mpr' ? overviewAnnotations : detailAnnotations);
     annotationToggle.setAttribute('aria-pressed', String(showMarkers));
     annotationToggle.dataset.semantic = getPlane();
@@ -161,7 +164,7 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
   }
 
   function startRound() {
-    if (!quizMode || !series || !layers.length || (round && !round.finished)) return;
+    if (!quizMode || !series || series.preview || !layers.length || (round && !round.finished)) return;
     const plane = PLANES[getPlane()];
     const target = pickQuizTarget(layers, series.dimensions[plane.axis], round?.target.name ?? scores.at(-1)?.target,
       Math.random, plane.axis);
@@ -210,19 +213,25 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
   });
   submitButton.addEventListener('click', submit);
   nextButton.addEventListener('click', startRound);
-  fetch(base + 'data/annotations.json').then(response => {
-    if (!response.ok) throw new Error('无法读取解剖标注');
-    return response.json();
-  }).then(data => {
-    if (!validLayers(data)) throw new Error('解剖标注格式有误');
-    layers = data;
-    buildPresets();
+  async function loadAnnotations() {
+    retry.disabled = true;
+    try {
+      const data = await readAssetJson(base + 'data/annotations.json', { priority: 'high' });
+      if (!validLayers(data)) throw new Error('解剖标注格式有误');
+      layers = data;
+      loadFailed = false;
+      buildPresets();
+    } catch {
+      loadFailed = true;
+      if (quizMode) quizTarget.textContent = '暂时无法读取题库';
+    }
+    retry.hidden = !loadFailed;
+    retry.disabled = false;
     drawAnnotations();
     startRound();
-  }).catch(() => {
-    loadFailed = true;
-    if (quizMode) quizTarget.textContent = '暂时无法读取题库';
-  });
+  }
+  retry.addEventListener('click', loadAnnotations);
+  loadAnnotations();
 
   return {
     drawAnnotations, setMode, checkDeadline,
@@ -234,6 +243,10 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     },
     confirmGesture() { if (quizMode) submit(); },
     setSeries(value) {
+      if (round) {
+        clearInterval(timer);
+        round = null;
+      }
       series = value;
       drawAnnotations();
       startRound();

@@ -269,6 +269,11 @@ button, .status-point, .slice-lock { flex-shrink: 0; }
 .feature-toggle[aria-pressed="true"] .toggle-indicator { border-color: var(--selection); background: var(--selection); }
 .station-footer { min-height: 29px; padding: 6px 10px; border-top: var(--border); color: var(--muted); font-size: 11px; }
 
+.volume-loading { display: grid; gap: 4px; padding: 5px 8px; font-size: 11px; color: var(--muted); }
+.volume-load-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+#volume-load-readout { white-space: nowrap; }
+#volume-load-bar { display: block; width: 100%; height: 4px; accent-color: var(--selection); }
+
 .tone-grid { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 
 .imaging-controls { min-width: 0; padding: 7px 8px; }

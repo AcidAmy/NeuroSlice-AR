@@ -1,4 +1,6 @@
 # NeuroSlice AR production build on Netlify.
+# The workspace uses one entry point and serves assets directly from dist.
+# Keep missing assets as 404s so the client can retry or switch formats.
 [build]
   command = "npm run build"
   publish = "dist"

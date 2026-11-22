@@ -54,11 +54,11 @@ export function bindToneControls(onChange) {
   }
   for (const input of [width, level, contrast, brightness]) input.addEventListener('input', update);
 
-  function setSeries(value) {
+  function setSeries(value, { preserveWindow = false } = {}) {
     series = value;
     for (const control of [brightness, contrast, ...mriButtons]) control.disabled = !value.mri;
     const defaults = value.ctWindow;
-    if (Number.isInteger(defaults?.width) && defaults.width >= Number(width.min) && defaults.width <= Number(width.max) &&
+    if (!preserveWindow && Number.isInteger(defaults?.width) && defaults.width >= Number(width.min) && defaults.width <= Number(width.max) &&
         Number.isInteger(defaults.level) && defaults.level >= Number(level.min) && defaults.level <= Number(level.max)) {
       width.value = defaults.width;
       level.value = defaults.level;

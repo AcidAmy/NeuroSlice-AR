@@ -49,6 +49,10 @@ python scripts/prepare_medical_data.py \
 
 浏览器兼容旧文件组 `volume.json`、`ct.i16le`、`mri.u8`。对已知 MRI 序列可在元数据中填 `"mriSequence": "t1"` 或 `"t2"`，也可提供同尺寸、已配准的 `mri_t1.u8` 与 `mri_t2.u8`。缺少物理间距的旧资产和合成数据使用 200 mm 示意轴向范围，界面会标明示意间距。开发时放入资产后刷新页面，生产环境需重新构建。
 
+生产构建从 `public/assets/` 生成 CT、MRI 和 GLB 的 Gzip 文件，以及从同一体数据采样的低分辨率预览，最大尺寸为 56 × 56 × 56。浏览器支持流式 Gzip 解压时先显示预览，再下载并替换为完整分辨率体数据。预览期间可浏览和切层，完整数据加载后可开始自测。完整下载失败时可重试，页面会保留已显示的预览或显示合成断层。
+
+Netlify 发布 `dist/` 中的静态文件。将 `.gz` 作为独立资产提供，由浏览器代码解压。原始文件供回退使用。Service Worker 缓存工作站页面及界面资源，影像下载由浏览器的 HTTP 缓存处理。
+
 ## 中文标注扩展
 
 编辑 `public/data/annotations.json`，每层填唯一 `id`、足侧到头顶的 `sliceRatio`、体表参照 `surfaceLandmark`、提示 `quizQuestion`，以及 `structures` 数组。可添加 `title` 和 `landmarkLabel` 作为预设卡标题与简短体表参照。每个结构填 `name`、`x`、`y`、`description`、`clinicalNote`。坐标从图像左上角起归一化到 0–1。目标层号按 `round(sliceRatio × (层数 − 1))` 计算，教学标注可见范围为目标 ±2 层。随附点位是合成图解示意；替换真实序列时需按重采样后的图像复核层位和点位。

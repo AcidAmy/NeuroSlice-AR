@@ -1,10 +1,7 @@
 import { cameraActive, describeStartError, startCamera, stopCamera } from '../camera.js';
-import { loadTrackers, trackers } from '../tracking/trackers.js';
-import { startLive } from '../loops/live.js';
 import { setProgress } from '../net.js';
 import { evaluate, initQuality, quality } from '../quality.js';
-import { createProjection } from '../ar/projection.js';
-import { loadVolumePair } from '../core/volumeSource.js';
+import { loadVolumeMetadata, loadVolumePair, loadVolumePreview, volumeFormats } from '../core/volumeSource.js';
 import { createMprPreview } from '../imaging/slicePreview.js';
 import { t } from './messages.js';
 import { createSpatialMapper } from '../core/spatialMapper.js';
@@ -45,6 +42,7 @@ let cursor = [64, 64, 77];
 let activePlane = 'axial';
 let layout = 'mpr';
 let projection, paintSlices, stopLoop;
+let trackers;
 let renderedSliceView;
 let modelSource, volumeSource;
 let depth = 120;
@@ -82,6 +80,7 @@ function instrumentSlider(id, label, outputId, unit = '') {
 const sliceTrack = installPrecisionScrubber(sliceInput, {
   label: '切层轨道', output: byId('slice-number'), minus: sliceBack, plus: sliceForward,
 });
+sliceTrack.sync({ valueText: '—' });
 instrumentSlider('projection-opacity', '透视强度', 'opacity-value', '%');
 const toneTracks = [
   instrumentSlider('ct-width', '窗宽 W', 'ct-width-value'),
@@ -279,7 +278,11 @@ async function toggleCamera() {
     stage = 'trackers';
     setStatus('正在加载 MediaPipe 追踪模型…');
     setProgress(0);
-    await loadTrackers(value => {
+    const [{ loadTrackers }, { startLive }] = await Promise.all([
+      import('../tracking/trackers.js'), import('../loops/live.js'),
+    ]);
+    if (session !== current) return;
+    trackers = await loadTrackers(value => {
       if (session === current) setProgress(value);
     });
     if (session !== current) return;
@@ -475,12 +478,13 @@ viewport.addEventListener('pointerleave', () => {
 new ResizeObserver(drawAR).observe(viewport);
 
 viewport.classList.add('is-orbitable');
-const seriesPromise = loadVolumePair(base, available);
-seriesPromise.then(series => createProjection({
+const formats = volumeFormats(available);
+const firstMetadata = formats.length ? loadVolumeMetadata(base, formats[0]).catch(() => null) : Promise.resolve(null);
+import('../ar/projection.js').then(({ createProjection }) => createProjection({
   canvas: byId('projection-image'), ring: byId('lens-guide'), base,
   labels: byId('model-labels'), labelCard: byId('model-label-card'),
   onSelection: drawAR,
-  available: series.meshFiles ? available.filter(name => series.meshFiles.includes(name)) : available,
+  available, metadata: firstMetadata,
 })).then(result => {
   projection = result;
   modelSource = result.modelSources;
@@ -490,30 +494,94 @@ seriesPromise.then(series => createProjection({
   modelSource = ['unavailable', 'unavailable'];
   updateSourceBadge();
   byId('projection-error').hidden = false;
+}).finally(() => {
+  byId('projection-loading').hidden = true;
 });
 
-seriesPromise.then(series => {
+function showSeries(series) {
+  const previousDimensions = dimensions;
+  const previousCursor = cursor;
   volumeSource = series.source;
   updateSourceBadge();
   dimensions = series.dimensions;
   spacing = series.spacing;
-  cursor = dimensions.map((size, axis) => Math.round((size - 1) * (axis === 2 ? 0.65 : 0.5)));
+  cursor = dimensions.map((size, axis) => Math.round((size - 1) * (paintSlices
+    ? previousCursor[axis] / (previousDimensions[axis] - 1)
+    : axis === 2 ? 0.65 : 0.5)));
   mpr.setSeries(series);
   mpr.setLayout(layout, activePlane);
   paintSlices = createMprPreview(mpr.entries, series);
   renderedSliceView = undefined;
-  tones.setSeries(series);
+  tones.setSeries(series, { preserveWindow: showingPreview && series.source === 'local' });
   learning.setSeries(series);
   sliceInput.disabled = false;
   configureSliceAxis();
   mapper.reset(index);
   chooseSlice(index);
-}).catch(() => {
-  volumeSource = 'unavailable';
-  updateSourceBadge();
-  byId('slice-gesture-status').textContent = '断层预览暂不可用。';
-});
+}
+
+const loadingPanel = byId('volume-loading');
+const loadLabel = byId('volume-load-label');
+const loadReadout = byId('volume-load-readout');
+const loadBar = byId('volume-load-bar');
+const retryVolume = byId('retry-volume');
+let showingPreview = false;
+let progressFrame;
+function showProgress(received, total) {
+  cancelAnimationFrame(progressFrame);
+  progressFrame = requestAnimationFrame(() => {
+    const mb = bytes => (bytes / 1e6).toFixed(2);
+    if (total) {
+      const percent = Math.min(100, Math.round(received / total * 100));
+      loadBar.value = percent;
+      loadReadout.textContent = `${mb(received)} / ${mb(total)} MB · ${percent}%`;
+    } else {
+      loadBar.removeAttribute('value');
+      loadReadout.textContent = received ? `${mb(received)} MB` : '';
+    }
+  });
+}
+
+async function loadImaging(initial = false) {
+  loadingPanel.hidden = false;
+  retryVolume.hidden = true;
+  loadBar.hidden = false;
+  loadLabel.textContent = showingPreview ? '低分辨率预览 · 加载完整 CT / MRI' : '正在加载断层影像';
+  showProgress(0, 0);
+  try {
+    const series = await loadVolumePair(base, available, {
+      firstMetadata: initial ? firstMetadata : undefined,
+      onProgress: showProgress,
+      async onMetadata(metadata, format) {
+        if (!paintSlices && format[0] === 'meta.json' && import.meta.env.PROD && typeof DecompressionStream === 'function') {
+          try {
+            showSeries(await loadVolumePreview(base, metadata));
+            showingPreview = true;
+          } catch {
+            // 完整体数据也可以独立加载。
+          }
+        }
+        loadLabel.textContent = showingPreview ? '低分辨率预览 · 加载完整断层' : '正在下载完整断层影像';
+      },
+      hasPreview: () => Boolean(paintSlices),
+    });
+    if (series) showSeries(series);
+    loadingPanel.hidden = Boolean(series && series.source !== 'fallback');
+    if (loadingPanel.hidden) showingPreview = false;
+    else loadLabel.textContent = showingPreview ? '完整影像加载失败，已保留低分辨率预览。' : '完整影像加载失败，正在显示合成断层。';
+  } catch {
+    loadLabel.textContent = '断层影像暂不可用。';
+  } finally {
+    cancelAnimationFrame(progressFrame);
+    loadBar.hidden = true;
+    loadReadout.textContent = '';
+    retryVolume.hidden = loadingPanel.hidden;
+  }
+}
+
+retryVolume.addEventListener('click', () => loadImaging());
+loadImaging(true);
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator && isSecureContext) {
-  navigator.serviceWorker.register(base + 'sw.js').catch(() => {});
+  navigator.serviceWorker.register(base + 'sw.js', { updateViaCache: 'none' }).catch(() => {});
 }

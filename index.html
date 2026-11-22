@@ -74,6 +74,7 @@
           <p class="model-label-location"></p>
           <p class="model-label-notes"></p>
         </aside>
+        <p class="viewport-feedback" id="projection-loading" role="status">正在加载 3D 模型</p>
         <p class="viewport-feedback" id="projection-error" hidden>当前浏览器无法显示 WebGL 透视。右侧断层预览仍可使用。</p>
       </div>
       <div class="ar-toolbar ar-toolbar-bottom">
@@ -116,6 +117,14 @@
           </div>
         </div>
       </div>
+      <div class="volume-loading" id="volume-loading">
+        <div class="volume-load-row">
+          <span id="volume-load-label" role="status">正在加载断层影像</span>
+          <span class="numeric" id="volume-load-readout" aria-hidden="true"></span>
+          <button type="button" id="retry-volume" class="control-button" hidden>重试</button>
+        </div>
+        <progress id="volume-load-bar" max="100" aria-label="断层影像下载进度"></progress>
+      </div>
       <div class="scan-pair mpr-grid" id="scan-pair" data-layout="mpr"></div>
       <div class="imaging-controls">
         <div class="slice-controls" id="slice-controls" data-semantic="axial">
@@ -153,6 +162,7 @@
         </div>
         <section class="slice-presets" id="slice-preset-shelf" aria-labelledby="slice-presets-heading" hidden>
           <h3 id="slice-presets-heading">经典轴位预设</h3>
+          <button type="button" class="control-button" id="retry-annotations" hidden>标注加载失败 · 重试</button>
           <div class="preset-grid" id="slice-presets"></div>
         </section>
       </div>

@@ -1,5 +1,5 @@
 /assets/*
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=0, must-revalidate
 /models/*
   Cache-Control: public, max-age=86400
 /wasm/*
