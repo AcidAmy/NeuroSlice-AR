@@ -1,9 +1,3 @@
-/assets/*
-  Cache-Control: public, max-age=0, must-revalidate
-/models/*
-  Cache-Control: public, max-age=86400
-/wasm/*
-  Cache-Control: public, max-age=86400
 /sw.js
   Cache-Control: no-cache
 /

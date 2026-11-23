@@ -42,18 +42,23 @@ export function createSliceTone() {
     const ct = modality === 'ct';
     const sequence = ct ? null : series.mriSequences?.[mriPreset];
     const volume = ct ? series.ct : sequence ?? series.mri;
-    if (!volume) return null;
+    if (!volume) {
+      delete cache[modality];
+      return null;
+    }
+    const dimensions = (ct ? series.ctDimensions
+      : (sequence && series.mriSequenceDimensions?.[mriPreset]) || series.mriDimensions) ?? series.dimensions;
     const width = ct ? ctWindow.width : contrast;
     const level = ct ? ctWindow.level : brightness;
     const preset = ct ? null : sequence ? 'native' : mriPreset;
     const phantom = !ct && series.source !== 'local';
     const previous = cache[modality];
-    if (previous?.volume === volume && previous.width === width && previous.level === level &&
+    if (previous?.volume === volume && previous.dimensions === dimensions && previous.width === width && previous.level === level &&
         previous.preset === preset && previous.phantom === phantom) return previous;
 
     const sameLut = previous?.width === width && previous.level === level &&
       previous.preset === preset && previous.phantom === phantom;
     const lut = sameLut ? previous.lut : ct ? buildHuLut(width, level) : buildMriLut(preset, level, width, phantom);
-    return cache[modality] = { volume, lut, bias: ct ? 32768 : 0, width, level, preset, phantom };
+    return cache[modality] = { volume, dimensions, lut, bias: ct ? 32768 : 0, width, level, preset, phantom };
   };
 }

@@ -5,6 +5,7 @@
 | MediaPipe Tasks Vision 0.10.14 | JavaScript 和 WASM 运行时采用 Apache-2.0。[MediaPipe 许可](https://github.com/google-ai-edge/mediapipe/blob/v0.10.14/LICENSE) |
 | MediaPipe 人脸和手部追踪模型 float16/1 | 模型许可及版本信息见各任务的官方模型卡。[人脸模型与模型卡](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker#models) · [手部模型与模型卡](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker#models) |
 | Three.js r160 | MIT，Copyright © 2010–2023 three.js authors。[版本许可全文](https://github.com/mrdoob/three.js/blob/r160/LICENSE) |
+| meshoptimizer 0.18.x | MIT，Copyright © 2016–2022 Arseny Kapoulkine。构建端编码，浏览器端使用 Three.js 随附的解码器。[许可全文](https://github.com/zeux/meshoptimizer/blob/v0.18/LICENSE.md) |
 | TotalSegmentator 2.18.0 | 离线使用 `total` 任务生成颅骨和大脑掩膜，使用 `craniofacial_structures` 任务生成下颌骨掩膜。项目代码采用 Apache-2.0，权重按对应任务条款使用。[代码许可](https://github.com/wasserth/TotalSegmentator/blob/master/LICENSE) · [官方任务说明](https://github.com/wasserth/TotalSegmentator#subtasks) · [Wasserthal 等](https://doi.org/10.1148/ryai.230024) |
 | BodyParts3D 4.0 | BodyParts3D, © The Database Center for Life Science (DBCLS), licensed under CC BY 4.0。颅骨取自 99% 精简 IS-A OBJ 归档，大脑取自 99% 精简 PART-OF OBJ 归档。[官方数据与 FMA 索引](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html) · [官方署名要求](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | IBM Plex Sans、IBM Plex Mono | 本地 WOFF2，SIL Open Font License 1.1。[IBM 项目](https://github.com/IBM/plex) · [随附许可](public/fonts/OFL.txt) |

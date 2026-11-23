@@ -101,6 +101,7 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
         entry.crossX = entry.crossY = undefined;
         entry.image.style.setProperty('--image-ratio', planeAspect(entry.plane, series.dimensions, series.spacing));
         entry.empty.hidden = entry.modality !== 'mri' || Boolean(series.mri);
+        entry.empty.textContent = series.mriPending ? '等待加载 MRI' : '未导入 MRI';
         entry.image.classList.toggle('is-empty', !entry.empty.hidden);
       }
     },

@@ -1,8 +1,10 @@
+import { openAssetCache } from './assetCache.js';
+
 export function warnAsset(url, error) {
   console.warn('[NeuroSlice AR]', url, error?.name ?? 'Error');
 }
 
-async function fetchAsset(url, consume, { signal, priority, idle = 15000, reload = false } = {}) {
+async function fetchAsset(url, consume, { signal, priority, idle = 15000, reload = false, cacheName, payload, initialResponse } = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal?.addEventListener('abort', abort, { once: true });
@@ -20,14 +22,42 @@ async function fetchAsset(url, consume, { signal, priority, idle = 15000, reload
   async function download() {
     if (controller.signal.aborted) throw controller.signal.reason;
     activity();
-    const response = await fetch(url, {
+    if (payload) {
+      return consume(new Response(payload, { headers: { 'Content-Length': String(payload.byteLength) } }), activity);
+    }
+    const cache = await openAssetCache(cacheName);
+    const request = cache && new Request(url);
+    if (request && !reload) {
+      const cached = await cache.match(request).catch(() => null);
+      if (cached) {
+        try {
+          activity();
+          return await consume(cached, activity);
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          await cache.delete(request).catch(() => {});
+        }
+      }
+    }
+    const response = initialResponse ? await initialResponse : await fetch(url, {
       signal: controller.signal, priority, cache: reload ? 'reload' : 'default',
     });
     activity();
-    if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
+    if (!response?.ok || response.headers.get('content-type')?.includes('text/html')) {
       throw new Error('资产不可用：' + url);
     }
-    return consume(response, activity);
+    let copy;
+    if (cache) {
+      try { copy = response.clone(); } catch { /* HTTP cache still works. */ }
+    }
+    try {
+      const result = await consume(response, activity);
+      if (copy) cache.put(request, copy).catch(() => {});
+      return result;
+    } catch (error) {
+      copy?.body?.cancel().catch(() => {});
+      throw error;
+    }
   }
 
   try {
@@ -154,4 +184,16 @@ export async function readCompressedOrRaw(url, { preferGzip, ...options }) {
     }
   }
   return readBinary(url, options);
+}
+
+
+export async function readAssetVariant({ compressed, raw, decodedLength }, options) {
+  if (compressed && typeof DecompressionStream === 'function') {
+    try {
+      return await readBinary(compressed, { ...options, expected: decodedLength, gzip: true });
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+    }
+  }
+  return readBinary(raw, { ...options, payload: compressed ? undefined : options.payload, expected: decodedLength });
 }

@@ -4,7 +4,8 @@
 import { FilesetResolver, FaceLandmarker, HandLandmarker } from "@mediapipe/tasks-vision";
 import { fetchBytes, embedded } from "../net.js";
 
-const BASE = import.meta.env.BASE_URL;
+const { trackingBase = '' } = JSON.parse(document.getElementById('medical-assets')?.textContent ?? '{}');
+const BASE = import.meta.env.BASE_URL + trackingBase;
 const REMOTE_WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const REMOTE_MODELS = "https://storage.googleapis.com/mediapipe-models/";
 const FACE_REMOTE = REMOTE_MODELS + "face_landmarker/face_landmarker/float16/1/face_landmarker.task";

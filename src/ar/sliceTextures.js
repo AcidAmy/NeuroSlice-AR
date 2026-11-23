@@ -1,7 +1,7 @@
 import {
   ClampToEdgeWrapping, DataTexture, DoubleSide, LinearFilter, RGBAFormat, ShaderMaterial, Vector2,
 } from 'three';
-import { sliceAddress } from '../core/mpr.js';
+import { rescaleVoxel, sliceAddress } from '../core/mpr.js';
 
 function smoothAlpha(value, start, end) {
   if (value <= start) return 0;
@@ -10,16 +10,32 @@ function smoothAlpha(value, start, end) {
   return Math.max(1, Math.round(255 * t * t * (3 - 2 * t)));
 }
 
-function fillSlice(pixels, width, height, address, series, { volume, lut, bias }) {
-  const { offset, u, v } = address;
+function fillSlice(pixels, width, height, plane, index, cursorIndex, series, tone, dimensions) {
+  const { offset, u, v } = sliceAddress(plane, index, dimensions);
   const { ct } = series;
+  const { volume, lut, bias } = tone;
   const realCt = ct && series.source === 'local';
+  const ctDimensions = series.ctDimensions ?? series.dimensions;
+  const sameGrid = dimensions.every((size, axis) => size === ctDimensions[axis]);
+  let mask;
+  if (ct && !sameGrid) {
+    const maskIndex = rescaleVoxel(cursorIndex, series.dimensions[plane.axis], ctDimensions[plane.axis]);
+    const address = sliceAddress(plane, maskIndex, ctDimensions);
+    const [columnAxis, rowAxis] = plane.axes;
+    mask = {
+      rows: Array.from({ length: height }, (_, row) =>
+        address.offset + address.v * rescaleVoxel(row, height, ctDimensions[rowAxis])),
+      columns: Array.from({ length: width }, (_, column) =>
+        address.u * rescaleVoxel(column, width, ctDimensions[columnAxis])),
+    };
+  }
   for (let row = 0, pixel = 0; row < height; row++) {
     let sample = offset + row * v;
     for (let column = 0; column < width; column++, sample += u, pixel += 4) {
       // 原始信号确定轮廓，调窗后的低灰度仍可代表不透明组织。
-      const alpha = realCt ? smoothAlpha(ct[sample], -450, -350)
-        : ct ? smoothAlpha(ct[sample], -900, -750) : smoothAlpha(volume[sample], 2, 14);
+      const hu = ct?.[mask ? mask.rows[row] + mask.columns[column] : sample];
+      const alpha = realCt ? smoothAlpha(hu, -450, -350)
+        : ct ? smoothAlpha(hu, -900, -750) : smoothAlpha(volume[sample], 2, 14);
       const gray = lut[volume[sample] + bias];
       // 线性过滤预乘灰度，软化一像素轮廓，避免透明空气在边缘引入黑晕。
       pixels[pixel] = pixels[pixel + 1] = pixels[pixel + 2] = Math.round(gray * alpha / 255);
@@ -69,20 +85,28 @@ export function createSliceTexture(plane, aperture) {
   let lastSeries, lastIndex, lastTone;
   return {
     material,
-    update(series, index, tone) {
-      if (lastSeries === series && lastIndex === index && lastTone === tone) return;
-      const [width, height] = plane.axes.map(axis => series.dimensions[axis]);
+    clear() {
+      if (!lastSeries) return;
+      texture.dispose();
+      texture.image = { data: new Uint8Array(4), width: 0, height: 0 };
+      lastSeries = lastTone = undefined;
+    },
+    update(series, cursorIndex, tone) {
+      const dimensions = tone.dimensions ?? series.dimensions;
+      const index = rescaleVoxel(cursorIndex, series.dimensions[plane.axis], dimensions[plane.axis]);
+      if (lastSeries?.deref() === series && lastIndex === cursorIndex && lastTone?.deref() === tone) return;
+      const [width, height] = plane.axes.map(axis => dimensions[axis]);
       if (texture.image.width !== width || texture.image.height !== height) {
         texture.dispose();
         texture.image = { data: new Uint8Array(width * height * 4), width, height };
         material.uniforms.uvScale.value.set(1 - 1 / width, 1 / height - 1);
         material.uniforms.uvOffset.value.set(0.5 / width, 1 - 0.5 / height);
       }
-      fillSlice(texture.image.data, width, height, sliceAddress(plane, index, series.dimensions), series, tone);
+      fillSlice(texture.image.data, width, height, plane, index, cursorIndex, series, tone, dimensions);
       texture.needsUpdate = true;
-      lastSeries = series;
-      lastIndex = index;
-      lastTone = tone;
+      lastSeries = new WeakRef(series);
+      lastIndex = cursorIndex;
+      lastTone = new WeakRef(tone);
     },
   };
 }

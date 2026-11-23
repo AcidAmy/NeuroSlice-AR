@@ -175,3 +175,30 @@ test('slice display enables 3D guides and falls back to CT when a series has no 
   assert.equal(display.showSliceTexture, false);
   assert.equal(modalityGroup.hidden, true);
 });
+
+test('MRI preview and full CT mask share the canonical slice and upgrade without moving it', () => {
+  const anatomy = new Group();
+  const update = attachSlicePlanes(anatomy);
+  const resolve = createSliceTone();
+  const dimensions = [3, 3, 3];
+  const ct = new Int16Array(27).fill(-1024);
+  ct.fill(40, 9, 18);
+  const state = { ...options, cursor: [1, 1, 1], dimensions, allPlanes: false };
+  const series = { dimensions, source: 'local', ct, mriDimensions: [2, 2, 2], mri: new Uint8Array(8).fill(64) };
+  const axial = anatomy.getObjectByName('axial-plane');
+  const surface = axial.children[0];
+  update(state, series, resolve(series, 'mri', {}));
+  const texture = textureOf(surface);
+  assert.equal(texture.image.width, 2);
+  assert.deepEqual([...texture.image.data.slice(0, 4)], [64, 64, 64, 255]);
+  const position = axial.position.clone();
+
+  const full = { ...series, mriDimensions: dimensions, mri: new Uint8Array(27).fill(128) };
+  let disposed = 0;
+  texture.addEventListener('dispose', () => disposed++);
+  update(state, full, resolve(full, 'mri', {}));
+  assert.equal(disposed, 1);
+  assert.equal(texture.image.width, 3);
+  assert.deepEqual([...texture.image.data.slice(0, 4)], [128, 128, 128, 255]);
+  assert.deepEqual(axial.position, position);
+});

@@ -1,7 +1,9 @@
 import { cameraActive, describeStartError, startCamera, stopCamera } from '../camera.js';
 import { setProgress } from '../net.js';
 import { evaluate, initQuality, quality } from '../quality.js';
-import { loadVolumeMetadata, loadVolumePair, loadVolumePreview, volumeFormats } from '../core/volumeSource.js';
+import { ctOnly, extraSequences, loadModality, loadPhantom, loadVolumeMetadata, seriesGeometry, volumeFormats } from '../core/volumeSource.js';
+import { modelNames, startModelDownloads } from '../core/modelSource.js';
+import { medicalCacheName, pruneMedicalCaches } from '../core/assetCache.js';
 import { createMprPreview } from '../imaging/slicePreview.js';
 import { t } from './messages.js';
 import { createSpatialMapper } from '../core/spatialMapper.js';
@@ -27,7 +29,8 @@ const sliceBack = byId('slice-back');
 const sliceForward = byId('slice-forward');
 const calibration = byId('calibration-panel');
 const base = import.meta.env.BASE_URL;
-const available = JSON.parse(byId('medical-assets')?.textContent ?? '[]');
+const { available = [], models: modelAssets, assetRelease } =
+  JSON.parse(byId('medical-assets')?.textContent ?? '{}');
 
 const controls = {
   opacity: byId('projection-opacity'),
@@ -114,11 +117,11 @@ const tones = bindToneControls(() => {
   for (const track of toneTracks) track.sync();
   paintCurrentSlices();
   if (display.showPlanes && display.showSliceTexture) drawAR();
-});
+}, key => requestMri(true, key));
 let sliceTone = tones.options();
 
 function paintCurrentSlices() {
-  paintSlices?.(cursor, sliceTone, layout === 'mpr' ? undefined : layout);
+  paintSlices?.(cursor, sliceTone, layout === 'mpr' ? undefined : layout, sliceSeries);
 }
 
 function activatePlane(key) {
@@ -394,7 +397,10 @@ const sliceDisplay = bindSliceDisplayControls({
   allPlanesToggle: byId('toggle-all-planes'),
   textureToggle: byId('toggle-slice-texture'),
   modalityGroup: byId('slice-modality'),
-}, display, drawAR);
+}, display, () => {
+  if (display.showSliceTexture && display.sliceModality === 'mri') requestMri(true);
+  drawAR();
+});
 const labelToggle = byId('toggle-model-labels');
 labelToggle.addEventListener('click', () => {
   display.showLabels = !display.showLabels;
@@ -494,24 +500,32 @@ async function loadProjection(metadata, options) {
   projectionProgress.removeAttribute('value');
   projectionLabel.textContent = '正在加载 3D 颅脑';
   try {
-    if (!projection) {
-      const { createProjection } = await import('../ar/projection.js');
-      projection = createProjection({
-        canvas: byId('projection-image'), ring: byId('lens-guide'), base,
-        labels: byId('model-labels'), labelCard: byId('model-label-card'),
-        onSelection: drawAR, available, resolveTone,
-      });
-    }
-    await projection.loadModels(metadata, {
+    const names = (projection?.pendingModelNames ?? modelNames).filter(name => available.includes(name) &&
+      (!Array.isArray(metadata?.meshFiles) || metadata.meshFiles.includes(name)));
+    const downloads = startModelDownloads(base, names, metadata?.modelAssets ?? modelAssets, {
       ...options,
       onProgress(received, total) {
-        if (options.signal.aborted || !total) return;
+        if (options.signal.aborted) return;
+        if (!total) {
+          projectionProgress.removeAttribute('value');
+          projectionLabel.textContent = '正在加载 3D 颅脑';
+          return;
+        }
         const percent = Math.min(100, Math.round(received / total * 100));
         projectionProgress.value = percent;
-        const label = `正在加载 3D 颅脑 ${percent}%`;
+        const label = percent === 100 ? '正在解析 3D 颅脑' : `正在加载 3D 颅脑 ${percent}%`;
         if (projectionLabel.textContent !== label) projectionLabel.textContent = label;
       },
     });
+    if (!projection) {
+      const { createProjection } = await import('../ar/projection.js');
+      if (options.signal.aborted) return;
+      projection = createProjection({
+        canvas: byId('projection-image'), ring: byId('lens-guide'), base,
+        labels: byId('model-labels'), labelCard: byId('model-label-card'), onSelection: drawAR, resolveTone,
+      });
+    }
+    await projection.loadModels(downloads, options);
     modelSource = projection.modelSources;
     drawAR();
     projectionReady = !modelSource.includes('fallback');
@@ -530,24 +544,27 @@ async function loadProjection(metadata, options) {
 function showSeries(series) {
   const previousDimensions = dimensions;
   const previousCursor = cursor;
+  const sameGrid = sliceSeries?.dimensions === series.dimensions;
   volumeSource = series.source;
   sliceSeries = series;
   sliceDisplay.setSeries(series);
   updateSourceBadge();
   dimensions = series.dimensions;
   spacing = series.spacing;
-  cursor = dimensions.map((size, axis) => Math.round((size - 1) * (paintSlices
-    ? previousCursor[axis] / (previousDimensions[axis] - 1)
-    : axis === 2 ? 0.65 : 0.5)));
+  if (!sameGrid) {
+    cursor = dimensions.map((size, axis) => Math.round((size - 1) * (paintSlices
+      ? previousCursor[axis] / (previousDimensions[axis] - 1)
+      : axis === 2 ? 0.65 : 0.5)));
+  }
   mpr.setSeries(series);
   mpr.setLayout(layout, activePlane);
-  paintSlices = createMprPreview(mpr.entries, series, resolveTone);
+  paintSlices ??= createMprPreview(mpr.entries, undefined, resolveTone);
   renderedSliceView = undefined;
-  tones.setSeries(series, { preserveWindow: showingPreview && series.source === 'local' });
-  learning.setSeries(series);
+  tones.setSeries(series, { preserveWindow: sameGrid });
+  learning.setSeries(series, { preserveRound: sameGrid });
   sliceInput.disabled = false;
   configureSliceAxis();
-  mapper.reset(index);
+  if (!sameGrid) mapper.reset(index);
   chooseSlice(index);
 }
 
@@ -556,102 +573,299 @@ const loadLabel = byId('volume-load-label');
 const loadReadout = byId('volume-load-readout');
 const loadBar = byId('volume-load-bar');
 const retryVolume = byId('retry-volume');
-let showingPreview = false;
-let fullReady = false;
-let volumeMetadata;
-let loading;
-let restarting = false;
+const qualityReadout = byId('volume-quality');
+const transfers = new Map();
+const levels = new Map();
 let progressFrame;
-function showProgress(received, total) {
-  cancelAnimationFrame(progressFrame);
+let loading;
+let imaging;
+let ctReady = false;
+let mriReady = false;
+let mriVisible = false;
+let restarting = false;
+
+function renderLoadState() {
+  const active = [...transfers.values()].find(item => !item.failed);
+  const failed = [...transfers.values()].find(item => item.failed);
+  const { received = 0, total = 0 } = active ?? {};
+  const label = active?.label ?? failed?.label;
+  const mb = bytes => (bytes / 1e6).toFixed(2);
+  const percent = total ? Math.min(100, Math.round(received / total * 100)) : 0;
+  loadingPanel.hidden = !label;
+  loadBar.hidden = !active;
+  retryVolume.hidden = !failed;
+  if (label && loadLabel.textContent !== label) loadLabel.textContent = label;
+  if (total) loadBar.value = percent;
+  else loadBar.removeAttribute('value');
+  loadReadout.textContent = total ? `${mb(received)} / ${mb(total)} MB · ${percent}%`
+    : received ? `${mb(received)} MB` : '';
+  const mriLevel = levels.get(tones.options().mriPreset) ?? levels.get('MRI');
+  const quality = [levels.get('CT'), mriLevel && 'MRI ' + mriLevel].filter(Boolean).join(' · ');
+  if (qualityReadout.value !== quality) qualityReadout.value = quality;
+}
+
+function scheduleLoadState() {
+  if (progressFrame) return;
   progressFrame = requestAnimationFrame(() => {
-    const mb = bytes => (bytes / 1e6).toFixed(2);
-    if (total) {
-      const percent = Math.min(100, Math.round(received / total * 100));
-      loadBar.value = percent;
-      loadReadout.textContent = `${mb(received)} / ${mb(total)} MB · ${percent}%`;
-    } else {
-      loadBar.removeAttribute('value');
-      loadReadout.textContent = received ? `${mb(received)} MB` : '';
-    }
+    progressFrame = undefined;
+    renderLoadState();
   });
 }
 
-async function loadImaging(metadata, options) {
-  if (fullReady) return;
-  loadBar.hidden = false;
-  const prefix = showingPreview ? '低分辨率预览 · ' : '';
+async function downloadLayer(context, name, label, options, { preview = false, signed = false } = {}) {
+  const entry = { label: `正在${preview ? '加载预览' : '下载高清'} ${label}` };
+  transfers.set(label, entry);
+  scheduleLoadState();
   try {
-    const series = await loadVolumePair(base, available, {
-      ...options,
-      firstMetadata: Promise.resolve(metadata),
-      onProgress(received, total, modality) {
-        if (options.signal.aborted) return;
-        const label = `${prefix}正在下载完整 ${modality}`;
-        if (loadLabel.textContent !== label) loadLabel.textContent = label;
-        showProgress(received, total);
+    return await loadModality(base, context.metadata, name, {
+      ...options, preview, signed,
+      cacheName: preview ? undefined : context.cacheName,
+      priority: signed && preview ? 'high' : 'low', idle: preview ? 20000 : 30000,
+      progress(received, total) {
+        entry.received = received;
+        entry.total = total;
+        scheduleLoadState();
       },
-      hasPreview: () => Boolean(paintSlices),
     });
-    if (options.signal.aborted) return;
-    if (series) showSeries(series);
-    fullReady = Boolean(series && series.source !== 'fallback');
-    loadingPanel.hidden = fullReady;
-    if (fullReady) showingPreview = false;
-    else loadLabel.textContent = showingPreview ? '完整影像加载失败，已保留低分辨率预览。' : '完整影像加载失败，正在显示合成断层。';
-  } catch {
-    if (!options.signal.aborted) loadLabel.textContent = '断层影像暂不可用。';
   } finally {
-    cancelAnimationFrame(progressFrame);
-    loadBar.hidden = true;
-    loadReadout.textContent = '';
-    retryVolume.hidden = fullReady || options.signal.aborted;
+    if (transfers.get(label) === entry) transfers.delete(label);
+    scheduleLoadState();
   }
 }
 
-async function loadWorkstation(options) {
-  if (!fullReady) {
-    loadingPanel.hidden = false;
-    loadBar.hidden = true;
-    loadLabel.textContent = showingPreview ? '低分辨率预览 · 等待加载完整断层' : '正在加载断层预览';
+function volumeFailed(key, label) {
+  transfers.set(key, { label, failed: true });
+  scheduleLoadState();
+}
+
+function afterPaint() {
+  // The timeout also allows progress if Chrome/Safari pauses animation frames in a background tab.
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, 90);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      clearTimeout(timer);
+      resolve();
+    }));
+  });
+}
+
+function whenIdle() {
+  return new Promise(resolve => {
+    if ('requestIdleCallback' in window) window.requestIdleCallback(resolve, { timeout: 500 });
+    else setTimeout(resolve, 32);
+  });
+}
+
+function applyCt(context, layer) {
+  const sameSource = imaging === context;
+  imaging = context;
+  ctReady = !layer.preview;
+  levels.set('CT', layer.preview ? 'CT 预览' : 'CT 高清');
+  showSeries({
+    ...context.geometry,
+    ...(sameSource ? sliceSeries : { mri: null, mriSequences: {}, mriSequenceDimensions: {}, mriPending: context.hasMri }),
+    ct: layer.voxels, ctDimensions: layer.dimensions, preview: layer.preview,
+  });
+  scheduleLoadState();
+}
+
+function applyMri(context, layer, key) {
+  const mriSequences = { ...sliceSeries.mriSequences };
+  const mriSequenceDimensions = { ...sliceSeries.mriSequenceDimensions };
+  const native = key ?? context.metadata.mriSequence;
+  // An explicitly supplied sequence takes precedence over a main-volume alias.
+  if ((native === 't1' || native === 't2') && (key || !levels.has(native))) {
+    mriSequences[native] = layer.voxels;
+    mriSequenceDimensions[native] = layer.dimensions;
   }
-  const metadata = formats.length && !volumeMetadata
-    ? loadVolumeMetadata(base, formats[0], options).then(value => (volumeMetadata = value)).catch(() => null)
-    : Promise.resolve(volumeMetadata ?? null);
-  const preview = !fullReady && !showingPreview && formats[0]?.[0] === 'meta.json' && import.meta.env.PROD
-    ? loadVolumePreview(base, metadata, options).then(series => {
-      if (!series || options.signal.aborted) return;
-      showSeries(series);
-      showingPreview = true;
-      loadLabel.textContent = '低分辨率预览 · 等待加载完整断层';
-    }).catch(() => {})
-    : null;
-  const [info] = await Promise.all([metadata, preview, learning.loadAnnotations(options)]);
+  if (key) levels.set(key, layer.preview ? '预览' : '高清');
+  else {
+    mriReady = !layer.preview;
+    levels.set('MRI', layer.preview ? '预览' : '高清');
+  }
+  showSeries({
+    ...sliceSeries, mriSequences, mriSequenceDimensions, mriPending: false,
+    ...(key ? {} : { mri: layer.voxels, mriDimensions: layer.dimensions }),
+  });
+  scheduleLoadState();
+}
+
+async function loadMri(context, job) {
+  const [, , name] = context.format;
+  const current = () => !job.options.signal.aborted && imaging === context;
+  if (!sliceSeries.mri) {
+    try {
+      const preview = await downloadLayer(context, name, 'MRI', job.options, { preview: true });
+      if (preview && current()) {
+        applyMri(context, preview);
+        await afterPaint();
+        requestSequence(tones.options().mriPreset);
+      }
+    } catch { /* The full series is still usable. */ }
+  }
+  await job.mriGate;
+  if (!job.mriUrgent) await whenIdle();
+  if (!current()) return;
+  try {
+    const full = await downloadLayer(context, name, 'MRI', job.options);
+    if (!current()) return;
+    applyMri(context, full);
+    requestSequence(tones.options().mriPreset);
+  } catch {
+    if (!current()) return;
+    showSeries({ ...sliceSeries, mriPending: false });
+    volumeFailed('MRI', sliceSeries.mri ? 'MRI 高清加载失败，已保留预览。' : 'MRI 加载失败。');
+  }
+}
+
+function requestSequence(key) {
+  const job = loading;
+  const context = imaging;
+  const name = extraSequences[key];
+  if (!job || job.options.signal.aborted || !context?.hasMri || !available.includes(name) ||
+      levels.get(key) === '高清' || job.sequences.has(key)) return;
+  const label = `MRI ${key.toUpperCase()}`;
+  const current = () => !job.options.signal.aborted && imaging === context;
+  job.sequences.set(key, (async () => {
+    if (!levels.has(key)) {
+      try {
+        const layer = await downloadLayer(context, name, label, job.options, { preview: true });
+        if (layer && current()) {
+          applyMri(context, layer, key);
+          await afterPaint();
+        }
+      } catch { /* The full sequence is still usable. */ }
+    }
+    await job.mriGate;
+    if (!current()) return;
+    try {
+      const layer = await downloadLayer(context, name, label, job.options);
+      if (current()) applyMri(context, layer, key);
+    } catch {
+      if (current()) volumeFailed(label, `${label} 高清加载失败，已保留可用影像。`);
+    } finally {
+      job.sequences.delete(key);
+    }
+  })());
+}
+
+function requestMri(urgent = false, key = tones.options().mriPreset) {
+  const job = loading;
+  if (!job || job.options.signal.aborted) return;
+  if (urgent) {
+    job.mriUrgent = true;
+    job.releaseMri();
+    scheduleLoadState();
+  }
+  if (!imaging?.hasMri) return;
+  if (!mriReady && !job.mriTask && (mriVisible || urgent || job.mriUrgent)) job.mriTask = loadMri(imaging, job);
+  if (urgent || job.mriUrgent) requestSequence(key);
+}
+
+const mriCards = mpr.entries.filter(entry => entry.modality === 'mri').map(entry => entry.card);
+if ('IntersectionObserver' in window) {
+  const visibleCards = new Set();
+  const observer = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) visibleCards.add(entry.target);
+      else visibleCards.delete(entry.target);
+    }
+    mriVisible = visibleCards.size > 0;
+    if (mriVisible) requestMri();
+  });
+  mriCards.forEach(card => observer.observe(card));
+} else mriVisible = true;
+mriCards.forEach(card => card.addEventListener('pointerdown', () => requestMri(true)));
+
+async function loadWorkstation(job) {
+  const { options } = job;
+  const annotations = learning.loadAnnotations(options);
+  let projectionTask;
+  const startProjection = context => {
+    const cacheName = context?.cacheName ?? medicalCacheName(base, assetRelease);
+    projectionTask ??= loadProjection(context?.metadata, { ...options, cacheName });
+  };
+  const getContext = async format => {
+    if (imaging?.format === format) return imaging;
+    const metadata = await loadVolumeMetadata(base, format, options);
+    const cacheName = medicalCacheName(base, metadata.assetRelease);
+    pruneMedicalCaches(cacheName);
+    return { metadata, format, cacheName, geometry: seriesGeometry(metadata), hasMri: !ctOnly(metadata) };
+  };
+
+  if (!ctReady) {
+    transfers.set('CT', { label: '正在加载断层预览' });
+    scheduleLoadState();
+    for (const format of formats) {
+      try {
+        const context = await getContext(format);
+        if (options.signal.aborted) return;
+        const [, name] = format;
+        if (!sliceSeries || sliceSeries.source !== 'local') {
+          try {
+            const preview = await downloadLayer(context, name, 'CT', options, { preview: true, signed: true });
+            if (preview && !options.signal.aborted) {
+              applyCt(context, preview);
+              await afterPaint();
+            }
+          } catch { /* A failed preview should never block the original series. */ }
+        }
+        if (options.signal.aborted) return;
+        startProjection(context);
+        requestMri();
+        const full = await downloadLayer(context, name, 'CT', options, { signed: true });
+        if (options.signal.aborted) return;
+        applyCt(context, full);
+        break;
+      } catch {
+        if (options.signal.aborted) return;
+        // Keep a usable preview on its registered grid for retry.
+        if (sliceSeries?.source === 'local') break;
+      }
+    }
+    transfers.delete('CT');
+    if (!ctReady && !options.signal.aborted) {
+      if (!sliceSeries) {
+        const phantom = await loadPhantom(formats.length > 0);
+        if (options.signal.aborted) return;
+        showSeries(phantom);
+        ctReady = !formats.length;
+      }
+      if (!ctReady) {
+        volumeFailed('CT', sliceSeries?.preview ? 'CT 高清加载失败，已保留预览。' : 'CT 加载失败，正在显示合成断层。');
+      }
+    }
+  }
   if (options.signal.aborted) return;
-  if (!fullReady) {
-    const prefix = showingPreview ? '低分辨率预览 · ' : '';
-    loadLabel.textContent = prefix + '等待 3D 加载后下载完整断层';
-  }
-  await loadProjection(info, options);
-  if (!options.signal.aborted) await loadImaging(info, options);
+  startProjection(imaging);
+  job.releaseMri();
+  requestMri();
+  if (mriReady) requestSequence(tones.options().mriPreset);
+  scheduleLoadState();
+  await Promise.all([projectionTask, annotations]);
 }
 
 function startLoading(reload = false) {
   const controller = new AbortController();
-  const done = loadWorkstation({ signal: controller.signal, reload }).finally(() => { loading = null; });
-  loading = { controller, done };
+  let releaseMri;
+  const mriGate = new Promise(resolve => { releaseMri = resolve; });
+  controller.signal.addEventListener('abort', releaseMri, { once: true });
+  const job = { controller, options: { signal: controller.signal, reload }, mriGate, releaseMri, sequences: new Map() };
+  loading = job;
+  job.done = loadWorkstation(job).catch(() => {
+    job.releaseMri();
+    if (!controller.signal.aborted) volumeFailed('CT', '断层影像暂不可用。');
+  });
 }
 
 async function retryAssets() {
   if (restarting) return;
   restarting = true;
-  retryProjection.hidden = true;
-  retryVolume.hidden = true;
+  retryProjection.hidden = retryVolume.hidden = true;
   try {
-    if (loading) {
-      loading.controller.abort();
-      await loading.done;
-    }
+    loading.controller.abort();
+    await loading.done;
+    transfers.clear();
     startLoading(true);
   } finally {
     restarting = false;

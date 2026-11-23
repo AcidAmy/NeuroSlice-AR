@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^1.2.0",
+    "meshoptimizer": "0.18.1",
     "vite": "^6.4.6"
   }
 }

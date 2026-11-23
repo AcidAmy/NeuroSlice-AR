@@ -2,6 +2,7 @@ import {
   DirectionalLight, Group, HemisphereLight, Matrix4, OrthographicCamera, Raycaster, Scene,
   Vector2, Vector3, Vector4, WebGLRenderer,
 } from 'three';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { generatePhantomBrain, generatePhantomSkull } from '../core/phantomDataGenerator.js';
 import { cameraCrop, createHeadPose, createPreviewOrbit, fitLiveHead } from './headPose.js';
@@ -9,7 +10,7 @@ import { createXRayFresnelShader } from './xrayFresnelShader.js';
 import { attachSlicePlanes } from './slicePlanes.js';
 import { createModelLabels } from './labels3d.js';
 import { createModelMaterials } from './modelMaterials.js';
-import { readCompressedOrRaw } from '../core/staticAssets.js';
+import { readOriginalModel } from '../core/modelSource.js';
 import { createSliceTone } from '../core/sliceTone.js';
 
 export function setLayerVisibility(skullGroup, brainGroup, layer) {
@@ -17,28 +18,32 @@ export function setLayerVisibility(skullGroup, brainGroup, layer) {
   brainGroup.visible = layer === 'brain' || layer === 'combined';
 }
 
-async function loadGeometry(directory, { name, material, makePhantom }, options) {
-  try {
-    const object = await readCompressedOrRaw(new URL(name, directory).href, {
-      ...options, preferGzip: import.meta.env?.PROD, idle: 30000,
-      async parse(bytes) {
-        if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) {
-          throw new Error('GLB 文件头无效');
-        }
-        const { scene } = await new GLTFLoader().parseAsync(bytes, directory.href);
-        let hasSurface = false;
-        scene.traverse(object => {
-          if (object.isMesh && object.geometry.getAttribute('position')?.count >= 3) {
-            if (!object.geometry.getAttribute('normal')) object.geometry.computeVertexNormals();
-            object.material = material;
-            hasSurface = true;
-          }
-        });
-        if (!hasSurface) throw new Error('GLB 未包含可用表面');
-        return scene;
-      },
+async function loadGeometry(directory, { name, material, makePhantom }, download, options) {
+  async function parse(bytes) {
+    const { scene } = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(bytes, directory.href);
+    let hasSurface = false;
+    scene.traverse(object => {
+      if (object.isMesh && object.geometry.getAttribute('position')?.count >= 3) {
+        if (!object.geometry.getAttribute('normal')) object.geometry.computeVertexNormals();
+        object.material = material;
+        hasSurface = true;
+      }
     });
-    return { object, source: 'local' };
+    if (!hasSurface) throw new Error('GLB 未包含可用表面');
+    return scene;
+  }
+
+  try {
+    const result = await download;
+    if (options.signal?.aborted) throw options.signal.reason;
+    if (!result) throw new Error('GLB 下载失败');
+    try {
+      return { object: await parse(result.bytes), source: 'local' };
+    } catch (error) {
+      if (!result.packed || options.signal?.aborted) throw error;
+      const bytes = await readOriginalModel(directory, name, options);
+      return { object: await parse(bytes), source: 'local' };
+    }
   } catch (error) {
     if (options.signal?.aborted) throw error;
     return { object: makePhantom(), source: 'fallback' };
@@ -57,7 +62,7 @@ export function pickAnatomy(raycaster, meshes, { half, inverseHead }) {
 }
 
 export function createProjection({
-  canvas, ring, labels, labelCard, base, available, onSelection = () => {}, resolveTone = createSliceTone(),
+  canvas, ring, labels, labelCard, base, onSelection = () => {}, resolveTone = createSliceTone(),
 }) {
   const contextOptions = { alpha: true, antialias: true };
   const context = canvas.getContext('webgl2', contextOptions) || canvas.getContext('webgl', contextOptions);
@@ -126,25 +131,13 @@ export function createProjection({
   let frameWidth;
   let frameHeight;
 
-  async function loadModels(metadata, { onProgress, ...options }) {
-    const pending = models.filter(model => !model.source || model.source === 'fallback');
-    const transfers = new Map(pending.map(model => [model.name, { received: 0, total: 0 }]));
-    const results = await Promise.all(pending.map(async model => {
-      if (!available.includes(model.name) ||
-          (Array.isArray(metadata?.meshFiles) && !metadata.meshFiles.includes(model.name))) {
-        transfers.delete(model.name);
-        return { object: model.makePhantom(), source: 'phantom' };
-      }
-      return loadGeometry(directory, model, {
-        ...options,
-        progress(received, total) {
-          transfers.set(model.name, { received, total });
-          const downloads = [...transfers.values()];
-          onProgress(downloads.reduce((sum, item) => sum + item.received, 0),
-            downloads.every(item => item.total) ? downloads.reduce((sum, item) => sum + item.total, 0) : 0);
-        },
-      });
-    }));
+  const pendingModels = () => models.filter(model => !model.source || model.source === 'fallback');
+
+  async function loadModels(downloads, options) {
+    const pending = pendingModels();
+    const results = await Promise.all(pending.map(model => downloads.has(model.name)
+      ? loadGeometry(directory, model, downloads.get(model.name), options)
+      : { object: model.makePhantom(), source: 'phantom' }));
     if (options.signal?.aborted) throw options.signal.reason;
 
     let changed = false;
@@ -241,7 +234,7 @@ export function createProjection({
     const { sliceSeries, sliceModality, sliceTone, showSliceTexture, showPlanes } = options;
     const tone = head.visible && showPlanes && showSliceTexture && sliceSeries
       ? resolveTone(sliceSeries, sliceModality, sliceTone) : null;
-    if (head.visible) updatePlanes(options, sliceSeries, tone);
+    updatePlanes(head.visible ? options : { ...options, showPlanes: false }, sliceSeries, tone);
     modelLabels?.update({
       enabled: options.showLabels, visible: head.visible, layer, world: anatomy.matrixWorld, camera,
       width, height, half, lens, cursor, radius,
@@ -265,6 +258,7 @@ export function createProjection({
   return {
     draw,
     loadModels,
+    get pendingModelNames() { return pendingModels().map(model => model.name); },
     setFrame,
     dragPreview: orbit.drag,
     setPointer(value) { pointer = value; },

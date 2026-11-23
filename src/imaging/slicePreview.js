@@ -1,4 +1,4 @@
-import { PLANES, sliceAddress } from '../core/mpr.js';
+import { PLANES, rescaleVoxel, sliceAddress } from '../core/mpr.js';
 
 import { createSliceTone } from '../core/sliceTone.js';
 
@@ -20,26 +20,33 @@ function paint(context, pixels, volume, address, lut, bias) {
 
 export function createMprPreview(entries, series, resolveTone = createSliceTone()) {
   const views = entries.map(({ canvas, key, modality }) => {
-    const plane = PLANES[key];
-    const [width, height] = plane.axes.map(axis => series.dimensions[axis]);
-    canvas.width = width;
-    canvas.height = height;
     const context = canvas.getContext('2d', { alpha: false });
-    const dataImage = context.createImageData(width, height);
-    return { key, modality, plane, context, pixels: { width, height, dataImage, data: dataImage.data } };
+    return { canvas, key, modality, plane: PLANES[key], context };
   });
-  return (cursor, options, selected) => {
-    const ctTone = resolveTone(series, 'ct', options);
-    const mriTone = resolveTone(series, 'mri', options);
+  return (cursor, options, selected, currentSeries = series) => {
+    const ctTone = resolveTone(currentSeries, 'ct', options);
+    const mriTone = resolveTone(currentSeries, 'mri', options);
     for (const view of views) {
       if (selected && view.key !== selected) continue;
       const tone = view.modality === 'ct' ? ctTone : mriTone;
-      const index = cursor[view.plane.axis];
-      // 十字线和标注在 DOM 层。只有体数据、正交层面或灰阶变化才提交 Canvas。
-      if (!tone || (view.lastIndex === index && view.lastTone === tone)) continue;
-      paint(view.context, view.pixels, tone.volume, sliceAddress(view.plane, index, series.dimensions), tone.lut, tone.bias);
+      if (!tone) {
+        view.lastTone = undefined;
+        continue;
+      }
+      const { plane, canvas, context } = view;
+      const dims = tone.dimensions;
+      const index = rescaleVoxel(cursor[plane.axis], currentSeries.dimensions[plane.axis], dims[plane.axis]);
+      if (view.lastIndex === index && view.lastTone?.deref() === tone) continue;
+      const [width, height] = plane.axes.map(axis => dims[axis]);
+      if (!view.pixels || canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        const dataImage = context.createImageData(width, height);
+        view.pixels = { width, height, dataImage, data: dataImage.data };
+      }
+      paint(context, view.pixels, tone.volume, sliceAddress(plane, index, dims), tone.lut, tone.bias);
       view.lastIndex = index;
-      view.lastTone = tone;
+      view.lastTone = new WeakRef(tone);
     }
   };
 }

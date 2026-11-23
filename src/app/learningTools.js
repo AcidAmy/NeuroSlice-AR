@@ -242,8 +242,8 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
       drawAnnotations();
     },
     confirmGesture() { if (quizMode) submit(); },
-    setSeries(value) {
-      if (round) {
+    setSeries(value, { preserveRound = false } = {}) {
+      if (round && !preserveRound) {
         clearInterval(timer);
         round = null;
       }

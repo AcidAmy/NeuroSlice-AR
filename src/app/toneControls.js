@@ -1,6 +1,6 @@
 import { CT_PRESETS } from '../imaging/slicePreview.js';
 
-export function bindToneControls(onChange) {
+export function bindToneControls(onChange, onMriInput = () => {}) {
   const byId = id => document.getElementById(id);
   const width = byId('ct-width');
   const level = byId('ct-level');
@@ -34,7 +34,7 @@ export function bindToneControls(onChange) {
     }
     for (const button of mriButtons) button.setAttribute('aria-pressed', String(button.dataset.mriPreset === mriPreset));
     const realSequence = Boolean(series?.mriSequences?.[mriPreset]);
-    byId('mri-overlay').value = series && !series.mri ? 'MRI —' : mriPreset.toUpperCase() + 'WI' + (realSequence ? '' : ' · SIM');
+    byId('mri-overlay').value = series && !series.mri ? (series.mriPending ? 'MRI 待加载' : 'MRI —') : mriPreset.toUpperCase() + 'WI' + (realSequence ? '' : ' · SIM');
     onChange();
   }
 
@@ -50,11 +50,17 @@ export function bindToneControls(onChange) {
     button.addEventListener('click', () => {
       mriPreset = button.dataset.mriPreset;
       update();
+      onMriInput(mriPreset);
     });
   }
-  for (const input of [width, level, contrast, brightness]) input.addEventListener('input', update);
+  for (const input of [width, level]) input.addEventListener('input', update);
+  for (const input of [contrast, brightness]) input.addEventListener('input', () => {
+    update();
+    onMriInput(mriPreset);
+  });
 
   function setSeries(value, { preserveWindow = false } = {}) {
+    const firstMri = !series?.mri && value.mri;
     series = value;
     for (const control of [brightness, contrast, ...mriButtons]) control.disabled = !value.mri;
     const defaults = value.ctWindow;
@@ -63,7 +69,7 @@ export function bindToneControls(onChange) {
       width.value = defaults.width;
       level.value = defaults.level;
     }
-    if (!value.mriSequences?.t1 && value.mriSequences?.t2) mriPreset = 't2';
+    if (firstMri && !value.mriSequences?.t1 && value.mriSequences?.t2) mriPreset = 't2';
     update();
   }
 

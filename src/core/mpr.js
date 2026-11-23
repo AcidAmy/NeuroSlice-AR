@@ -29,6 +29,10 @@ export function pointToVoxel(plane, point, cursor, dimensions) {
   return result;
 }
 
+export function rescaleVoxel(value, fromSize, toSize) {
+  return clampVoxel(value * (toSize - 1) / (fromSize - 1), toSize);
+}
+
 export function sliceAddress(plane, index, dimensions) {
   const [nx, ny] = dimensions;
   const strides = [1, nx, nx * ny];

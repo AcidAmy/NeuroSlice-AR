@@ -50,11 +50,15 @@ export function attachSlicePlanes(head, aperture = { value: new Vector4() }) {
     return { key, plane, group, fill, surface, texture, edge, lines };
   });
 
+  let previousSeries;
   return ({ cursor, dimensions, spacing, activePlane, allPlanes, showPlanes }, series, tone) => {
+    const changed = previousSeries?.deref() !== series;
+    if (changed) previousSeries = series ? new WeakRef(series) : undefined;
     const { point: [x, y, z], halfX, halfZ } = headFrame(cursor, dimensions, spacing);
     for (const { key, plane, group, fill, surface, texture, edge, lines } of planes) {
       const active = key === activePlane;
       group.visible = showPlanes && (active || allPlanes);
+      if (changed && (!group.visible || !tone)) texture.clear();
       if (!group.visible) continue;
       if (tone) texture.update(series, cursor[plane.axis], tone);
       surface.material = tone ? texture.material : fill;
