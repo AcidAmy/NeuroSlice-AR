@@ -56,16 +56,19 @@ export function createModelMaterials(skull, brain, { headSpace, aperture, clipHa
   return {
     get parts() { return parts.map(part => part.mesh); },
     setGroup,
-    update({ mode, opacity, layer, lens, selected, viewAxisHead }) {
-      const transparent = opacity < 1 || lens;
+    update({ mode, opacity, layer, lens, half, textured = false, selected, viewAxisHead }) {
+      const transparent = opacity < 1 || lens || textured;
       for (const { mesh, isBone, xray, specimen, base, highlight } of parts) {
         const active = selected?.has(mesh);
         const dimmed = selected?.size && !active;
-        xray.uniforms.opacity.value = opacity;
+        xray.uniforms.opacity.value = opacity * (textured ? (isBone ? 0.63 : 0.26) : 1);
+        xray.depthTest = textured;
         xray.uniforms.viewAxisHead.value.copy(viewAxisHead);
         xray.uniforms.layerWeight.value = !isBone && layer === 'combined' ? 0.65 : 1;
         xray.uniforms.emphasis.value = active ? 0.78 : dimmed ? -0.24 : 0;
-        specimen.opacity = opacity;
+        const shellOpacity = half ? (isBone ? 0.40 : 0.20) : (isBone ? 0.24 : 0.10);
+        specimen.opacity = opacity * (textured ? (active ? Math.max(shellOpacity, 0.55) : shellOpacity) : 1);
+        specimen.depthWrite = !textured;
         if (specimen.transparent !== transparent) {
           specimen.transparent = transparent;
           specimen.needsUpdate = true;

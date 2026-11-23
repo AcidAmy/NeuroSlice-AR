@@ -84,6 +84,13 @@
         <button type="button" class="control-button feature-toggle" id="toggle-scan-line" aria-pressed="true"><span class="toggle-indicator" aria-hidden="true"></span>3D 切面</button>
         <button type="button" class="control-button feature-toggle" id="toggle-model-labels" data-semantic="coronal" aria-pressed="false" aria-controls="model-labels"><span class="toggle-indicator" aria-hidden="true"></span>3D 标签</button>
         <button type="button" class="control-button feature-toggle" id="toggle-all-planes" aria-pressed="false"><span class="toggle-indicator" aria-hidden="true"></span>三面同显</button>
+        <div class="slice-texture-tools">
+          <button type="button" class="control-button feature-toggle" id="toggle-slice-texture" aria-pressed="false" aria-controls="slice-modality"><span class="toggle-indicator" aria-hidden="true"></span>切面显影</button>
+          <div class="segments slice-modality" id="slice-modality" role="group" aria-label="切面显影模态" hidden>
+            <button type="button" data-slice-modality="ct" data-semantic="axial" aria-pressed="true" disabled>CT</button>
+            <button type="button" data-slice-modality="mri" data-semantic="mri" aria-pressed="false" disabled>MRI</button>
+          </div>
+        </div>
         <label class="opacity-control" for="projection-opacity">
           <span>透视强度</span><input type="range" id="projection-opacity" min="0" max="100" value="82"><output id="opacity-value" for="projection-opacity">82%</output>
         </label>

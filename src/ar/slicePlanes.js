@@ -1,8 +1,9 @@
 import {
   BufferGeometry, EdgesGeometry, Float32BufferAttribute, Group, LineBasicMaterial,
-  LineSegments, Mesh, MeshBasicMaterial, PlaneGeometry, DoubleSide,
+  LineSegments, Mesh, MeshBasicMaterial, PlaneGeometry, DoubleSide, Vector4,
 } from 'three';
 import { AXIS_PLANES, PLANES, headFrame } from '../core/mpr.js';
+import { createSliceTexture } from './sliceTextures.js';
 
 const rotations = {
   axial: [Math.PI / 2, 0, 0],
@@ -18,7 +19,7 @@ function crossGeometry(vertical) {
   return geometry;
 }
 
-export function attachSlicePlanes(head) {
+export function attachSlicePlanes(head, aperture = { value: new Vector4() }) {
   const geometry = new PlaneGeometry(2, 2);
   const outlineGeometry = new EdgesGeometry(geometry);
   const planes = Object.entries(PLANES).map(([key, plane]) => {
@@ -31,6 +32,7 @@ export function attachSlicePlanes(head) {
     });
     const surface = new Mesh(geometry, fill);
     surface.renderOrder = 10;
+    const texture = createSliceTexture(plane, aperture);
     const edge = new LineSegments(outlineGeometry, new LineBasicMaterial({
       color: plane.color, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false,
     }));
@@ -45,15 +47,19 @@ export function attachSlicePlanes(head) {
     });
     group.add(surface, edge, ...lines);
     head.add(group);
-    return { key, group, fill, edge, lines };
+    return { key, plane, group, fill, surface, texture, edge, lines };
   });
 
-  return ({ cursor, dimensions, spacing, activePlane, allPlanes, showPlanes }) => {
+  return ({ cursor, dimensions, spacing, activePlane, allPlanes, showPlanes }, series, tone) => {
     const { point: [x, y, z], halfX, halfZ } = headFrame(cursor, dimensions, spacing);
-    for (const { key, group, fill, edge, lines } of planes) {
+    for (const { key, plane, group, fill, surface, texture, edge, lines } of planes) {
       const active = key === activePlane;
       group.visible = showPlanes && (active || allPlanes);
       if (!group.visible) continue;
+      if (tone) texture.update(series, cursor[plane.axis], tone);
+      surface.material = tone ? texture.material : fill;
+      // 写入切面深度后，再混合颅骨和大脑表面，最后绘制语义线。
+      surface.renderOrder = tone ? 0 : 10;
       fill.opacity = active ? 0.12 : 0.064;
       edge.material.opacity = active ? 0.88 : 0.50;
       if (key === 'axial') {

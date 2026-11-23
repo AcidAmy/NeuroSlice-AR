@@ -10,6 +10,7 @@ import { attachSlicePlanes } from './slicePlanes.js';
 import { createModelLabels } from './labels3d.js';
 import { createModelMaterials } from './modelMaterials.js';
 import { readCompressedOrRaw } from '../core/staticAssets.js';
+import { createSliceTone } from '../core/sliceTone.js';
 
 export function setLayerVisibility(skullGroup, brainGroup, layer) {
   skullGroup.visible = layer === 'skull' || layer === 'combined';
@@ -55,7 +56,9 @@ export function pickAnatomy(raycaster, meshes, { half, inverseHead }) {
     })?.object;
 }
 
-export function createProjection({ canvas, ring, labels, labelCard, base, available, onSelection = () => {} }) {
+export function createProjection({
+  canvas, ring, labels, labelCard, base, available, onSelection = () => {}, resolveTone = createSliceTone(),
+}) {
   const contextOptions = { alpha: true, antialias: true };
   const context = canvas.getContext('webgl2', contextOptions) || canvas.getContext('webgl', contextOptions);
   if (!context) throw new Error('WebGL 不可用');
@@ -101,12 +104,13 @@ export function createProjection({ canvas, ring, labels, labelCard, base, availa
   const inverseHead = new Matrix4();
   const viewAxisHead = new Vector3();
   const aperture = new Vector4();
+  const apertureUniform = { value: aperture };
   const clipHalf = { value: false };
   const materials = createModelMaterials(skullGroup, brainGroup, {
-    headSpace: { value: inverseHead }, aperture: { value: aperture }, clipHalf,
+    headSpace: { value: inverseHead }, aperture: apertureUniform, clipHalf,
   });
   let modelLabels;
-  const updatePlanes = attachSlicePlanes(anatomy);
+  const updatePlanes = attachSlicePlanes(anatomy, apertureUniform);
   const calibrationDepth = new Vector3();
   const raycaster = new Raycaster();
   const ndc = new Vector2();
@@ -234,12 +238,18 @@ export function createProjection({ canvas, ring, labels, labelCard, base, availa
       ring.style.setProperty('--lens-y', cursor.y + 'px');
       ring.style.setProperty('--lens-diameter', radius * 2 + 'px');
     }
-    updatePlanes(options);
+    const { sliceSeries, sliceModality, sliceTone, showSliceTexture, showPlanes } = options;
+    const tone = head.visible && showPlanes && showSliceTexture && sliceSeries
+      ? resolveTone(sliceSeries, sliceModality, sliceTone) : null;
+    if (head.visible) updatePlanes(options, sliceSeries, tone);
     modelLabels?.update({
       enabled: options.showLabels, visible: head.visible, layer, world: anatomy.matrixWorld, camera,
       width, height, half, lens, cursor, radius,
     });
-    materials.update({ mode: options.renderMode, opacity, layer, lens, selected: modelLabels?.selectedMeshes, viewAxisHead });
+    materials.update({
+      mode: options.renderMode, opacity, layer, lens, half, textured: Boolean(tone),
+      selected: modelLabels?.selectedMeshes, viewAxisHead,
+    });
     renderer.render(scene, camera);
   }
 

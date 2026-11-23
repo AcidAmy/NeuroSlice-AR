@@ -156,6 +156,9 @@ button, .status-point, .slice-lock { flex-shrink: 0; }
 
 .ar-toolbar { flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 7px 9px; }
 .ar-toolbar-bottom { flex-wrap: wrap; justify-content: start; }
+.slice-texture-tools { display: inline-flex; align-items: center; gap: 4px; }
+.slice-modality { border-radius: 999px; }
+.slice-modality button { padding-inline: 6px; border-radius: 999px; }
 .tool-block { gap: 6px; }
 .control-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .ar-viewport {

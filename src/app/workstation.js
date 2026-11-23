@@ -12,6 +12,8 @@ import { PLANES, clampVoxel } from '../core/mpr.js';
 import { createMprViews } from '../ui/mprViews.js';
 import { installPrecisionScrubber } from '../ui/precisionScrubber.js';
 import { bindToneControls } from './toneControls.js';
+import { bindSliceDisplayControls } from './sliceDisplayControls.js';
+import { createSliceTone } from '../core/sliceTone.js';
 
 const byId = id => document.getElementById(id);
 const viewport = byId('ar-viewport');
@@ -35,6 +37,7 @@ const controls = {
 const display = {
   layer: 'combined', renderMode: 'specimen', half: false, lens: false,
   showPlanes: true, allPlanes: false, showLabels: false,
+  showSliceTexture: false, sliceModality: 'ct',
 };
 let dimensions = [128, 128, 120];
 let spacing = dimensions.map(size => 200 / (size - 1));
@@ -44,7 +47,7 @@ let layout = 'mpr';
 let projection, paintSlices, stopLoop;
 let trackers;
 let renderedSliceView;
-let modelSource, volumeSource;
+let modelSource, volumeSource, sliceSeries;
 let depth = 120;
 let index = Number(sliceInput.value);
 let session = 0;
@@ -105,13 +108,17 @@ const learning = createLearningTools({
     byId('slice-lock').hidden = true;
   },
 });
+const resolveTone = createSliceTone();
 const tones = bindToneControls(() => {
+  sliceTone = tones.options();
   for (const track of toneTracks) track.sync();
   paintCurrentSlices();
+  if (display.showPlanes && display.showSliceTexture) drawAR();
 });
+let sliceTone = tones.options();
 
 function paintCurrentSlices() {
-  paintSlices?.(cursor, tones.options(), layout === 'mpr' ? undefined : layout);
+  paintSlices?.(cursor, sliceTone, layout === 'mpr' ? undefined : layout);
 }
 
 function activatePlane(key) {
@@ -132,6 +139,7 @@ function configureSliceAxis() {
   sliceTrack.sync({ defaultValue: Math.round((depth - 1) * (activePlane === 'axial' ? 0.65 : 0.5)) });
   byId('slice-controls').dataset.semantic = activePlane;
   byId('toggle-scan-line').dataset.semantic = activePlane;
+  byId('toggle-slice-texture').dataset.semantic = activePlane;
   byId('active-plane').textContent = plane.label;
   const endpoints = { axial: ['足侧', '头顶'], coronal: ['前方', '后方'], sagittal: ['右侧', '左侧'] };
   const [start, end] = endpoints[activePlane];
@@ -159,6 +167,9 @@ function drawAR() {
     half: display.half,
     lens: display.lens,
     showPlanes: display.showPlanes,
+    showSliceTexture: display.showSliceTexture,
+    sliceModality: display.sliceModality,
+    sliceSeries, sliceTone,
     showLabels: display.showLabels,
     allPlanes: display.allPlanes && layout === 'mpr',
     activePlane,
@@ -378,27 +389,17 @@ for (const button of renderButtons) {
     drawAR();
   });
 }
-const scanToggle = byId('toggle-scan-line');
-scanToggle.addEventListener('click', () => {
-  display.showPlanes = !display.showPlanes;
-  scanToggle.setAttribute('aria-pressed', String(display.showPlanes));
-  drawAR();
-});
+const sliceDisplay = bindSliceDisplayControls({
+  scanToggle: byId('toggle-scan-line'),
+  allPlanesToggle: byId('toggle-all-planes'),
+  textureToggle: byId('toggle-slice-texture'),
+  modalityGroup: byId('slice-modality'),
+}, display, drawAR);
 const labelToggle = byId('toggle-model-labels');
 labelToggle.addEventListener('click', () => {
   display.showLabels = !display.showLabels;
   labelToggle.setAttribute('aria-pressed', String(display.showLabels));
   if (!display.showLabels) projection?.clearSelection(false, false);
-  drawAR();
-});
-const allPlanesToggle = byId('toggle-all-planes');
-allPlanesToggle.addEventListener('click', () => {
-  display.allPlanes = !display.allPlanes;
-  allPlanesToggle.setAttribute('aria-pressed', String(display.allPlanes));
-  if (display.allPlanes && !display.showPlanes) {
-    display.showPlanes = true;
-    scanToggle.setAttribute('aria-pressed', 'true');
-  }
   drawAR();
 });
 for (const button of document.querySelectorAll('[data-mpr-layout]')) {
@@ -498,7 +499,7 @@ async function loadProjection(metadata, options) {
       projection = createProjection({
         canvas: byId('projection-image'), ring: byId('lens-guide'), base,
         labels: byId('model-labels'), labelCard: byId('model-label-card'),
-        onSelection: drawAR, available,
+        onSelection: drawAR, available, resolveTone,
       });
     }
     await projection.loadModels(metadata, {
@@ -530,6 +531,8 @@ function showSeries(series) {
   const previousDimensions = dimensions;
   const previousCursor = cursor;
   volumeSource = series.source;
+  sliceSeries = series;
+  sliceDisplay.setSeries(series);
   updateSourceBadge();
   dimensions = series.dimensions;
   spacing = series.spacing;
@@ -538,7 +541,7 @@ function showSeries(series) {
     : axis === 2 ? 0.65 : 0.5)));
   mpr.setSeries(series);
   mpr.setLayout(layout, activePlane);
-  paintSlices = createMprPreview(mpr.entries, series);
+  paintSlices = createMprPreview(mpr.entries, series, resolveTone);
   renderedSliceView = undefined;
   tones.setSeries(series, { preserveWindow: showingPreview && series.source === 'local' });
   learning.setSeries(series);
