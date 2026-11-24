@@ -84,7 +84,7 @@ function instrumentSlider(id, label, outputId, unit = '') {
 }
 
 const sliceTrack = installPrecisionScrubber(sliceInput, {
-  label: '切层轨道', output: byId('slice-number'), minus: sliceBack, plus: sliceForward,
+  label: PLANES.axial.label, output: byId('slice-number'), minus: sliceBack, plus: sliceForward,
 });
 sliceTrack.sync({ valueText: '—' });
 instrumentSlider('projection-opacity', '透视强度', 'opacity-value', '%');
@@ -114,6 +114,7 @@ const learning = createLearningTools({
 const resolveTone = createSliceTone();
 const tones = bindToneControls(() => {
   sliceTone = tones.options();
+  mpr.setMriLabel('MRI ' + tones.mriLabel());
   for (const track of toneTracks) track.sync();
   paintCurrentSlices();
   if (display.showPlanes && display.showSliceTexture) drawAR();
@@ -143,11 +144,8 @@ function configureSliceAxis() {
   byId('slice-controls').dataset.semantic = activePlane;
   byId('toggle-scan-line').dataset.semantic = activePlane;
   byId('toggle-slice-texture').dataset.semantic = activePlane;
-  byId('active-plane').textContent = plane.label;
-  const endpoints = { axial: ['足侧', '头顶'], coronal: ['前方', '后方'], sagittal: ['右侧', '左侧'] };
-  const [start, end] = endpoints[activePlane];
-  byId('slice-start').textContent = start;
-  byId('slice-end').textContent = end;
+  sliceTrack.label.textContent = plane.label;
+  sliceInput.setAttribute('aria-label', plane.label);
 }
 
 function selectLayout(value) {
@@ -215,11 +213,13 @@ function manualSlice(value) {
   mapper.setManual(index, performance.now(), manualPointer !== null);
 }
 
-function setStatus(message) {
+// Silent while things work; speaks only when the user has to wait or act.
+function setStatus(message = '') {
   if (status.textContent !== message) status.textContent = message;
+  status.hidden = !message;
 }
 
-function endCamera(message = '启动摄像头后，透视模型会跟随头部。') {
+function endCamera(message) {
   session++;
   stopLoop?.();
   stopLoop = null;
@@ -227,13 +227,12 @@ function endCamera(message = '启动摄像头后，透视模型会跟随头部�
   projection?.setFrame(null);
   frame.hidden = true;
   viewport.classList.remove('is-live');
-  fps.parentElement.classList.remove('is-active');
+  fps.parentElement.hidden = true;
   fps.value = '—';
   fpsStart = fpsSamples = 0;
   manualPointer = null;
   mapper.reset(index);
   byId('slice-lock').hidden = true;
-  byId('slice-gesture-status').textContent = '指尖上下移动可切层，捏合 0.2 秒锁定。也可使用滚轮或滑块。';
   setProgress(null);
   cameraButton.disabled = false;
   delete cameraButton.dataset.live;
@@ -247,12 +246,6 @@ function handleFrame(data) {
   learning.checkDeadline();
   const gesture = mapper.update({ ...data, depth: paintSlices ? depth : 0, plane: activePlane });
   byId('slice-lock').hidden = !gesture.locked;
-  const hint = gesture.pickup
-    ? '手动控制中。将指尖移动到当前层附近以平滑接管。'
-    : ({ axial: '指尖上下移动', coronal: '指尖前后或上下移动', sagittal: '指尖左右移动' })[activePlane]
-      + '可切层，捏合 0.2 秒锁定。';
-  const gestureStatus = byId('slice-gesture-status');
-  if (gestureStatus.textContent !== hint) gestureStatus.textContent = hint;
   if (gesture.index !== index) chooseSlice(gesture.index, false);
   if (gesture.confirmed) learning.confirmGesture();
   if (!fpsStart) fpsStart = data.now;
@@ -265,13 +258,10 @@ function handleFrame(data) {
     fpsStart = data.now;
     fpsSamples = 0;
   }
-  if (!data.faceLandmarks || !data.transformMatrix) {
-    setStatus('请面向摄像头，将双眼和鼻梁移入画面。');
-  } else if (!trackers.hand) {
-    setStatus('正在追踪头部。指尖追踪暂不可用。');
-  } else {
-    setStatus('正在追踪头部与手部。');
-  }
+  if (!data.faceLandmarks || !data.transformMatrix) setStatus('请面向摄像头');
+  else if (!trackers.hand) setStatus('指尖追踪不可用');
+  else if (gesture.pickup) setStatus('将指尖移到当前层附近接管');
+  else setStatus();
   drawAR();
   return { rawY: gesture.rawY, filteredY: gesture.filteredY };
 }
@@ -284,14 +274,14 @@ async function toggleCamera() {
   const current = ++session;
   let stage = 'camera';
   cameraButton.disabled = true;
-  setStatus('正在请求摄像头权限…');
+  setStatus('正在请求摄像头…');
   try {
     await startCamera(video, () => {
-      if (session === current) endCamera('摄像头已断开，可以重新启动。');
+      if (session === current) endCamera('摄像头已断开');
     });
     if (session !== current) return;
     stage = 'trackers';
-    setStatus('正在加载 MediaPipe 追踪模型…');
+    setStatus('正在加载追踪模型…');
     setProgress(0);
     const [{ loadTrackers }, { startLive }] = await Promise.all([
       import('../tracking/trackers.js'), import('../loops/live.js'),
@@ -307,7 +297,8 @@ async function toggleCamera() {
     cameraButton.textContent = '关闭摄像头';
     frame.hidden = false;
     viewport.classList.add('is-live');
-    fps.parentElement.classList.add('is-active');
+    fps.parentElement.hidden = false;
+    setStatus();
     monitor.reset();
     stopLoop = startLive({
       video, frame, onFrame: handleFrame,
@@ -318,7 +309,7 @@ async function toggleCamera() {
       onError: () => {
         projection?.setFrame(null);
         drawAR();
-        setStatus('追踪暂时中断，正在等待下一帧。');
+        setStatus('追踪中断，正在恢复…');
       },
     });
   } catch (error) {
@@ -412,12 +403,12 @@ for (const button of document.querySelectorAll('[data-mpr-layout]')) {
   button.addEventListener('click', () => selectLayout(button.dataset.mprLayout));
 }
 const calibrationValues = [
-  [controls.scale, '整体缩放', 'value-scale'],
-  [controls.scaleX, '水平宽窄 (X)', 'value-scale-x'],
-  [controls.scaleY, '垂直高矮 (Y)', 'value-scale-y'],
-  [controls.yOffset, '上下偏移', 'value-y'],
-  [controls.zOffset, '深度偏移', 'value-z'],
-  [controls.xOffset, '水平偏移', 'value-x'],
+  [controls.scale, '缩放', 'value-scale'],
+  [controls.scaleX, '宽度', 'value-scale-x'],
+  [controls.scaleY, '高度', 'value-scale-y'],
+  [controls.yOffset, '上下', 'value-y'],
+  [controls.zOffset, '深度', 'value-z'],
+  [controls.xOffset, '左右', 'value-x'],
 ].map(([input, label, output]) => [input, instrumentSlider(input.id, label, output, '%')]);
 byId('open-calibration').addEventListener('click', () => calibration.showModal());
 byId('open-credits').addEventListener('click', () => byId('credits-panel').showModal());
@@ -498,7 +489,7 @@ async function loadProjection(metadata, options) {
   projectionFeedback.hidden = false;
   projectionProgress.hidden = false;
   projectionProgress.removeAttribute('value');
-  projectionLabel.textContent = '正在加载 3D 颅脑';
+  projectionLabel.hidden = true;
   try {
     const names = (projection?.pendingModelNames ?? modelNames).filter(name => available.includes(name) &&
       (!Array.isArray(metadata?.meshFiles) || metadata.meshFiles.includes(name)));
@@ -506,15 +497,8 @@ async function loadProjection(metadata, options) {
       ...options,
       onProgress(received, total) {
         if (options.signal.aborted) return;
-        if (!total) {
-          projectionProgress.removeAttribute('value');
-          projectionLabel.textContent = '正在加载 3D 颅脑';
-          return;
-        }
-        const percent = Math.min(100, Math.round(received / total * 100));
-        projectionProgress.value = percent;
-        const label = percent === 100 ? '正在解析 3D 颅脑' : `正在加载 3D 颅脑 ${percent}%`;
-        if (projectionLabel.textContent !== label) projectionLabel.textContent = label;
+        if (total) projectionProgress.value = Math.min(100, Math.round(received / total * 100));
+        else projectionProgress.removeAttribute('value');
       },
     });
     if (!projection) {
@@ -529,12 +513,13 @@ async function loadProjection(metadata, options) {
     modelSource = projection.modelSources;
     drawAR();
     projectionReady = !modelSource.includes('fallback');
-    projectionLabel.textContent = '3D 模型加载失败，正在显示占位模型。';
+    projectionLabel.textContent = '3D 模型加载失败';
   } catch {
     if (options.signal.aborted) return;
-    projectionLabel.textContent = '3D 颅脑暂不可用。';
+    projectionLabel.textContent = '3D 颅脑不可用';
   } finally {
     projectionProgress.hidden = true;
+    projectionLabel.hidden = projectionReady;
     projectionFeedback.hidden = projectionReady;
     retryProjection.hidden = projectionReady || options.signal.aborted;
     updateSourceBadge();
@@ -569,11 +554,10 @@ function showSeries(series) {
 }
 
 const loadingPanel = byId('volume-loading');
+const loadError = byId('volume-load-error');
 const loadLabel = byId('volume-load-label');
-const loadReadout = byId('volume-load-readout');
 const loadBar = byId('volume-load-bar');
 const retryVolume = byId('retry-volume');
-const qualityReadout = byId('volume-quality');
 const transfers = new Map();
 const levels = new Map();
 let progressFrame;
@@ -584,24 +568,17 @@ let mriReady = false;
 let mriVisible = false;
 let restarting = false;
 
+// A thin bar while downloading; words only when a download failed.
 function renderLoadState() {
   const active = [...transfers.values()].find(item => !item.failed);
   const failed = [...transfers.values()].find(item => item.failed);
   const { received = 0, total = 0 } = active ?? {};
-  const label = active?.label ?? failed?.label;
-  const mb = bytes => (bytes / 1e6).toFixed(2);
-  const percent = total ? Math.min(100, Math.round(received / total * 100)) : 0;
-  loadingPanel.hidden = !label;
+  loadingPanel.hidden = !active && !failed;
   loadBar.hidden = !active;
-  retryVolume.hidden = !failed;
-  if (label && loadLabel.textContent !== label) loadLabel.textContent = label;
-  if (total) loadBar.value = percent;
+  loadError.hidden = !failed;
+  if (failed && loadLabel.textContent !== failed.label) loadLabel.textContent = failed.label;
+  if (total) loadBar.value = Math.min(100, Math.round(received / total * 100));
   else loadBar.removeAttribute('value');
-  loadReadout.textContent = total ? `${mb(received)} / ${mb(total)} MB · ${percent}%`
-    : received ? `${mb(received)} MB` : '';
-  const mriLevel = levels.get(tones.options().mriPreset) ?? levels.get('MRI');
-  const quality = [levels.get('CT'), mriLevel && 'MRI ' + mriLevel].filter(Boolean).join(' · ');
-  if (qualityReadout.value !== quality) qualityReadout.value = quality;
 }
 
 function scheduleLoadState() {
@@ -613,7 +590,7 @@ function scheduleLoadState() {
 }
 
 async function downloadLayer(context, name, label, options, { preview = false, signed = false } = {}) {
-  const entry = { label: `正在${preview ? '加载预览' : '下载高清'} ${label}` };
+  const entry = {};
   transfers.set(label, entry);
   scheduleLoadState();
   try {
@@ -660,7 +637,6 @@ function applyCt(context, layer) {
   const sameSource = imaging === context;
   imaging = context;
   ctReady = !layer.preview;
-  levels.set('CT', layer.preview ? 'CT 预览' : 'CT 高清');
   showSeries({
     ...context.geometry,
     ...(sameSource ? sliceSeries : { mri: null, mriSequences: {}, mriSequenceDimensions: {}, mriPending: context.hasMri }),
@@ -794,7 +770,7 @@ async function loadWorkstation(job) {
   };
 
   if (!ctReady) {
-    transfers.set('CT', { label: '正在加载断层预览' });
+    transfers.set('CT', {});
     scheduleLoadState();
     for (const format of formats) {
       try {

@@ -18,6 +18,12 @@ export function bindToneControls(onChange, onMriInput = () => {}) {
     };
   }
 
+  // Caption for the MRI images: the active sequence, flagged when it is simulated from another one.
+  function mriLabel() {
+    const name = mriPreset.toUpperCase();
+    return series?.mri && !series.mriSequences?.[mriPreset] ? name + ' SIM' : name;
+  }
+
   function update() {
     byId('ct-width-value').value = width.value;
     byId('ct-level-value').value = level.value;
@@ -26,15 +32,11 @@ export function bindToneControls(onChange, onMriInput = () => {}) {
     const current = options().ctWindow;
     const bone = current.width === CT_PRESETS.bone.width && current.level === CT_PRESETS.bone.level;
     width.closest('.tone-control').dataset.semantic = bone ? 'sagittal' : 'axial';
-    byId('ct-overlay').dataset.semantic = bone ? 'sagittal' : 'axial';
-    byId('ct-overlay').value = `W ${current.width} / L ${current.level}`;
     for (const button of ctButtons) {
       const preset = CT_PRESETS[button.dataset.ctWindow];
       button.setAttribute('aria-pressed', String(current.width === preset.width && current.level === preset.level));
     }
     for (const button of mriButtons) button.setAttribute('aria-pressed', String(button.dataset.mriPreset === mriPreset));
-    const realSequence = Boolean(series?.mriSequences?.[mriPreset]);
-    byId('mri-overlay').value = series && !series.mri ? (series.mriPending ? 'MRI 待加载' : 'MRI —') : mriPreset.toUpperCase() + 'WI' + (realSequence ? '' : ' · SIM');
     onChange();
   }
 
@@ -73,5 +75,5 @@ export function bindToneControls(onChange, onMriInput = () => {}) {
     update();
   }
 
-  return { options, setSeries };
+  return { options, setSeries, mriLabel };
 }

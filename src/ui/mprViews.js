@@ -20,8 +20,8 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
       card.dataset.plane = key;
       card.dataset.modality = modality;
       const heading = element('figcaption', 'mpr-caption');
-      heading.append(element('span', 'mpr-plane numeric', plane.short),
-        element('span', 'mpr-modality', modality.toUpperCase()), element('span', 'mpr-title', plane.label));
+      const modalityName = element('span', 'mpr-modality', modality.toUpperCase());
+      heading.append(element('span', 'mpr-plane numeric', plane.short), modalityName);
       const zoom = element('button', 'mpr-detail', '⤢');
       zoom.type = 'button';
       zoom.setAttribute('aria-label', '放大' + plane.label + ' ' + modality.toUpperCase());
@@ -47,7 +47,7 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
       well.append(image);
       card.append(heading, well);
       container.append(card);
-      const entry = { card, canvas, image, key, modality, overlay, plane, empty };
+      const entry = { card, canvas, image, key, modality, modalityName, overlay, plane, empty };
       entries.push(entry);
       let pointerId;
       function position(event) {
@@ -95,6 +95,11 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
   }
   return {
     entries, render, setLayout,
+    setMriLabel(text) {
+      for (const entry of entries) {
+        if (entry.modality === 'mri' && entry.modalityName.textContent !== text) entry.modalityName.textContent = text;
+      }
+    },
     setSeries(value) {
       series = value;
       for (const entry of entries) {

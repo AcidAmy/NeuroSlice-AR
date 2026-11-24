@@ -47,5 +47,5 @@ export function installPrecisionScrubber(input, { label, output, minus, plus, un
   controls.append(back, track, forward);
   input.addEventListener('dblclick', () => { input.value = input.defaultValue; dispatch(); });
   sync();
-  return { node, sync };
+  return { node, sync, label: name };
 }

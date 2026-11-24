@@ -18,13 +18,12 @@
         <h1>NeuroSlice <span>AR</span></h1>
         <span class="source-badge" id="workstation-source" role="status" hidden>部分影像为占位数据</span>
       </div>
-      <p class="quiz-intro" id="quiz-intro" hidden>用滚轮或切层轨道找到目标层面，再提交定位。</p>
       <div class="work-actions">
         <div class="segments mode-picker" role="group" aria-label="工作模式">
-          <button type="button" data-mode="lesson" aria-pressed="true">教学浏览</button>
-          <button type="button" data-mode="quiz" aria-pressed="false" title="在限时内找到指定解剖层面">自我测试</button>
+          <button type="button" data-mode="lesson" aria-pressed="true">浏览</button>
+          <button type="button" data-mode="quiz" aria-pressed="false">测试</button>
         </div>
-        <div class="fps-meter numeric" aria-label="摄像头帧率"><span class="status-point" aria-hidden="true"></span><output id="fps-value" aria-live="off">—</output><span>FPS</span></div>
+        <div class="fps-meter numeric" aria-label="摄像头帧率" hidden><span class="status-point" aria-hidden="true"></span><output id="fps-value" aria-live="off">—</output><span>FPS</span></div>
         <button type="button" class="control-button" id="open-calibration" aria-haspopup="dialog">校准</button>
         <button type="button" class="control-button primary-button" id="camera-action">启动摄像头</button>
       </div>
@@ -33,30 +32,21 @@
   <div id="tracker-progress" class="tracker-progress" hidden aria-hidden="true"><div id="tracker-progress-fill"></div></div>
 
   <main class="workspace">
-    <section class="station ar-station" aria-labelledby="ar-caption">
-      <div class="station-heading">
-        <h2 id="ar-caption">WebAR 透视定位</h2>
-      </div>
+    <section class="station ar-station" aria-label="三维透视">
       <div class="ar-toolbar ar-toolbar-top">
-        <div class="tool-block">
-          <span class="control-label">图层</span>
-          <div class="segments" role="group" aria-label="透视图层">
-            <button type="button" data-ar-layer="skull" aria-pressed="false">颅骨</button>
-            <button type="button" data-semantic="mri" data-ar-layer="brain" aria-pressed="false">大脑</button>
-            <button type="button" data-ar-layer="combined" aria-pressed="true">联合</button>
-          </div>
+        <div class="segments" role="group" aria-label="透视图层">
+          <button type="button" data-ar-layer="skull" aria-pressed="false">颅骨</button>
+          <button type="button" data-semantic="mri" data-ar-layer="brain" aria-pressed="false">大脑</button>
+          <button type="button" data-ar-layer="combined" aria-pressed="true">联合</button>
         </div>
-        <div class="tool-block">
-          <span class="control-label">视图</span>
-          <div class="segments" role="group" aria-label="透视视图">
-            <button type="button" data-ar-view="full" aria-pressed="true">全头</button>
-            <button type="button" data-ar-view="half" aria-pressed="false">半剖</button>
-            <button type="button" data-ar-view="lens" aria-pressed="false">指尖镜窗</button>
-          </div>
+        <div class="segments" role="group" aria-label="透视视图">
+          <button type="button" data-ar-view="full" aria-pressed="true">全头</button>
+          <button type="button" data-ar-view="half" aria-pressed="false">半剖</button>
+          <button type="button" data-ar-view="lens" aria-pressed="false">镜窗</button>
         </div>
         <div class="segments" role="group" aria-label="模型渲染模式">
-          <button type="button" data-ar-render="specimen" data-semantic="sagittal" aria-pressed="true">解剖标本</button>
-          <button type="button" data-ar-render="xray" aria-pressed="false">X光透视</button>
+          <button type="button" data-ar-render="specimen" data-semantic="sagittal" aria-pressed="true">标本</button>
+          <button type="button" data-ar-render="xray" aria-pressed="false">X 光</button>
         </div>
       </div>
       <div class="ar-viewport" id="ar-viewport">
@@ -75,10 +65,11 @@
           <p class="model-label-notes"></p>
         </aside>
         <div class="viewport-feedback" id="projection-feedback">
-          <p id="projection-loading" role="status">断层预览后加载 3D 颅脑</p>
-          <progress id="projection-progress" max="100" aria-label="3D 模型下载进度" hidden></progress>
+          <p id="projection-loading" role="status" hidden></p>
+          <progress id="projection-progress" max="100" aria-label="3D 模型下载进度"></progress>
           <button type="button" id="retry-projection" class="control-button" hidden>重试</button>
         </div>
+        <p class="viewport-status" id="tracking-status" role="status" hidden></p>
       </div>
       <div class="ar-toolbar ar-toolbar-bottom">
         <button type="button" class="control-button feature-toggle" id="toggle-scan-line" aria-pressed="true"><span class="toggle-indicator" aria-hidden="true"></span>3D 切面</button>
@@ -95,13 +86,9 @@
           <span>透视强度</span><input type="range" id="projection-opacity" min="0" max="100" value="82"><output id="opacity-value" for="projection-opacity">82%</output>
         </label>
       </div>
-      <p class="station-footer" id="tracking-status" role="status">启动摄像头后，透视模型会跟随头部。</p>
     </section>
 
-    <section class="station imaging-station" aria-labelledby="imaging-caption">
-      <div class="station-heading">
-        <h2 id="imaging-caption">多模态断层</h2>
-      </div>
+    <section class="station imaging-station" aria-label="多模态断层">
       <div class="quiz-panel" id="quiz-panel" hidden>
         <div class="quiz-heading"><strong id="quiz-target">加载题库后开始</strong><output id="quiz-time" aria-live="off">15 秒</output></div>
         <p id="quiz-hint"></p>
@@ -109,60 +96,44 @@
         <div class="quiz-actions">
           <button type="button" class="control-button primary-button" id="quiz-submit" disabled>提交定位</button>
           <button type="button" class="control-button" id="quiz-next" disabled>下一题</button>
-          <span id="quiz-record" class="numeric"></span>
         </div>
       </div>
       <div class="mpr-toolbar">
         <div class="segments" role="group" aria-label="断层布局">
           <button type="button" data-mpr-layout="mpr" aria-pressed="true">三视图</button>
-          <button type="button" data-mpr-layout="axial" data-semantic="axial" aria-pressed="false">轴位详查</button>
-          <button type="button" data-mpr-layout="coronal" data-semantic="coronal" aria-pressed="false">冠位详查</button>
-          <button type="button" data-mpr-layout="sagittal" data-semantic="sagittal" aria-pressed="false">矢位详查</button>
+          <button type="button" data-mpr-layout="axial" data-semantic="axial" aria-pressed="false">轴位</button>
+          <button type="button" data-mpr-layout="coronal" data-semantic="coronal" aria-pressed="false">冠位</button>
+          <button type="button" data-mpr-layout="sagittal" data-semantic="sagittal" aria-pressed="false">矢位</button>
         </div>
-        <div class="mpr-options">
-          <button type="button" id="toggle-annotations" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>标注点</button>
-          <div class="frame-readout numeric">
-            <output id="ct-overlay" aria-label="当前 CT 窗宽窗位">W 80 / L 40</output>
-            <output id="mri-overlay" data-semantic="mri" aria-label="当前 MRI 序列">T1WI</output>
-            <output id="volume-quality" aria-label="断层影像清晰度" aria-live="polite"></output>
-          </div>
-        </div>
+        <button type="button" id="toggle-annotations" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>标注点</button>
       </div>
       <div class="volume-loading" id="volume-loading">
-        <div class="volume-load-row">
-          <span id="volume-load-label" role="status">正在加载断层影像</span>
-          <span class="numeric" id="volume-load-readout" aria-hidden="true"></span>
-          <button type="button" id="retry-volume" class="control-button" hidden>重试</button>
-        </div>
         <progress id="volume-load-bar" max="100" aria-label="断层影像下载进度"></progress>
+        <div class="volume-load-row" id="volume-load-error" hidden>
+          <span id="volume-load-label" role="status"></span>
+          <button type="button" id="retry-volume" class="control-button">重试</button>
+        </div>
       </div>
       <div class="scan-pair mpr-grid" id="scan-pair" data-layout="mpr"></div>
       <div class="imaging-controls">
         <div class="slice-controls" id="slice-controls" data-semantic="axial">
-          <div class="slice-caption">
-            <span class="plane-readout" id="active-plane">横断面</span>
-            <span class="annotation-layer" id="annotation-layer" aria-live="polite" hidden></span>
-            <span class="slice-lock" id="slice-lock" data-semantic="coronal" role="status" hidden>切片已锁定</span>
-          </div>
-          <input id="slice-index" type="range" min="0" max="119" value="77" disabled>
+          <span class="slice-lock" id="slice-lock" data-semantic="coronal" role="status" hidden>已锁定</span>
+          <input id="slice-index" type="range" min="0" max="119" value="77" aria-label="横断面" disabled>
           <output id="slice-number" for="slice-index">—</output>
           <button type="button" id="slice-back" class="control-button numeric" aria-label="上一层" disabled>−</button>
           <button type="button" id="slice-forward" class="control-button numeric" aria-label="下一层" disabled>+</button>
-          <div class="slice-endpoints" aria-hidden="true"><span id="slice-start">足侧</span><span id="slice-end">头顶</span></div>
         </div>
         <div class="tone-grid">
-          <section class="tone-control" aria-labelledby="ct-controls-heading">
-            <h3 id="ct-controls-heading">CT 调窗</h3>
+          <section class="tone-control" aria-label="CT 调窗">
             <div class="segments tone-presets" role="group" aria-label="CT 调窗预设">
-              <button type="button" data-ct-window="brain" aria-pressed="true">脑窗 <span class="numeric">80/40</span></button>
-              <button type="button" data-semantic="sagittal" data-ct-window="bone" aria-pressed="false">骨窗 <span class="numeric">2000/400</span></button>
-              <button type="button" data-ct-window="subdural" aria-pressed="false">软组织 <span class="numeric">300/50</span></button>
+              <button type="button" data-ct-window="brain" aria-pressed="true">脑窗</button>
+              <button type="button" data-semantic="sagittal" data-ct-window="bone" aria-pressed="false">骨窗</button>
+              <button type="button" data-ct-window="subdural" aria-pressed="false">软组织</button>
             </div>
             <label class="tone-slider">窗宽 W <input id="ct-width" type="range" min="1" max="4096" value="80"><output id="ct-width-value" for="ct-width">80</output></label>
             <label class="tone-slider">窗位 L <input id="ct-level" type="range" min="-1024" max="3071" value="40"><output id="ct-level-value" for="ct-level">40</output></label>
           </section>
-          <section class="tone-control" data-semantic="mri" aria-labelledby="mri-controls-heading">
-            <h3 id="mri-controls-heading">MRI 对比</h3>
+          <section class="tone-control" data-semantic="mri" aria-label="MRI 对比">
             <div class="segments tone-presets numeric" data-semantic="mri" role="group" aria-label="MRI 序列预设">
               <button type="button" data-mri-preset="t1" aria-pressed="true">T1WI</button>
               <button type="button" data-mri-preset="t2" aria-pressed="false">T2WI</button>
@@ -171,18 +142,16 @@
             <label class="tone-slider">亮度 <input id="mri-brightness" type="range" min="-80" max="80" value="0"><output id="mri-brightness-value" for="mri-brightness">0</output></label>
           </section>
         </div>
-        <section class="slice-presets" id="slice-preset-shelf" aria-labelledby="slice-presets-heading" hidden>
-          <h3 id="slice-presets-heading">经典轴位预设</h3>
+        <section class="slice-presets" id="slice-preset-shelf" aria-label="经典轴位预设" hidden>
           <button type="button" class="control-button" id="retry-annotations" hidden>标注加载失败 · 重试</button>
           <div class="preset-grid" id="slice-presets"></div>
         </section>
       </div>
-      <p class="station-footer numeric" id="slice-gesture-status">指尖上下移动可切层，捏合 0.2 秒锁定。也可使用滚轮或滑块。</p>
     </section>
   </main>
 
   <footer class="work-footer">
-    <div>仅供医学教学与科研演示，不作临床诊断依据<span aria-hidden="true"> · </span><button type="button" id="open-credits" aria-haspopup="dialog">数据来源与致谢</button></div>
+    <div>仅供教学科研，非临床诊断<span aria-hidden="true"> · </span><button type="button" id="open-credits" aria-haspopup="dialog">致谢</button></div>
   </footer>
 
   <dialog class="work-dialog anatomy-detail" id="anatomy-detail" aria-labelledby="anatomy-name">
@@ -193,7 +162,7 @@
 
   <dialog class="work-dialog credits" id="credits-panel" aria-labelledby="credits-caption">
     <form method="dialog">
-      <header class="dialog-heading"><h2 id="credits-caption">数据来源与致谢</h2><button type="submit" class="control-button">关闭</button></header>
+      <header class="dialog-heading"><h2 id="credits-caption">致谢</h2><button type="submit" class="control-button">关闭</button></header>
       <dl>
         <dt><a href="https://github.com/wasserth/TotalSegmentator" target="_blank" rel="noreferrer">TotalSegmentator</a></dt>
         <dd>离线分割工具。项目代码采用 Apache-2.0，权重按所用任务和版本的条款使用。</dd>
@@ -216,25 +185,24 @@
   <dialog id="calibration-panel" class="calibration" aria-labelledby="calibration-caption">
     <form method="dialog" class="calibration-body">
       <header class="dialog-heading">
-        <h2 id="calibration-caption">透视校准</h2>
+        <h2 id="calibration-caption">校准</h2>
         <button type="submit" class="control-button" aria-label="关闭校准">关闭</button>
       </header>
-      <div><label for="align-scale">整体缩放</label><output for="align-scale" id="value-scale">100%</output><input type="range" id="align-scale" min="65" max="150" step="0.5" value="100"></div>
-      <div><label for="align-scale-x">水平宽窄 (X)</label><output for="align-scale-x" id="value-scale-x">100%</output><input type="range" id="align-scale-x" min="80" max="120" step="0.5" value="100"></div>
-      <div><label for="align-scale-y">垂直高矮 (Y)</label><output for="align-scale-y" id="value-scale-y">100%</output><input type="range" id="align-scale-y" min="80" max="120" step="0.5" value="100"></div>
-      <div><label for="align-y">上下偏移</label><output for="align-y" id="value-y">0%</output><input type="range" id="align-y" min="-20" max="20" step="0.5" value="0" title="正值向上"></div>
-      <div><label for="align-z">深度偏移</label><output for="align-z" id="value-z">0%</output><input type="range" id="align-z" min="-35" max="35" step="0.5" value="0" title="正值向头内，转动时可见贴合变化"></div>
-      <div><label for="align-x">水平偏移</label><output for="align-x" id="value-x">0%</output><input type="range" id="align-x" min="-20" max="20" step="0.5" value="0" title="正值向屏幕右侧"></div>
-      <button type="button" id="reset-calibration" class="control-button">重置默认</button>
+      <div><label for="align-scale">缩放</label><output for="align-scale" id="value-scale">100%</output><input type="range" id="align-scale" min="65" max="150" step="0.5" value="100"></div>
+      <div><label for="align-scale-x">宽度</label><output for="align-scale-x" id="value-scale-x">100%</output><input type="range" id="align-scale-x" min="80" max="120" step="0.5" value="100"></div>
+      <div><label for="align-scale-y">高度</label><output for="align-scale-y" id="value-scale-y">100%</output><input type="range" id="align-scale-y" min="80" max="120" step="0.5" value="100"></div>
+      <div><label for="align-y">上下</label><output for="align-y" id="value-y">0%</output><input type="range" id="align-y" min="-20" max="20" step="0.5" value="0"></div>
+      <div><label for="align-z">深度</label><output for="align-z" id="value-z">0%</output><input type="range" id="align-z" min="-35" max="35" step="0.5" value="0"></div>
+      <div><label for="align-x">左右</label><output for="align-x" id="value-x">0%</output><input type="range" id="align-x" min="-20" max="20" step="0.5" value="0"></div>
+      <button type="button" id="reset-calibration" class="control-button">重置</button>
       <details class="measure-panel" id="measure-panel">
-        <summary>性能与防抖监测</summary>
+        <summary>性能</summary>
         <dl>
           <dt>平均渲染 FPS</dt><dd id="measure-fps">—</dd>
           <dt>追踪 + 渲染耗时</dt><dd id="measure-cost">—</dd>
           <dt>指尖 Y 标准差（原始 / EMA）</dt><dd id="measure-jitter">—</dd>
           <dt>抖动抑制率</dt><dd id="measure-suppression">—</dd>
         </dl>
-        <p>最近 <span class="numeric">5</span> 秒。测抖动时请保持指尖静止。</p>
         <button type="button" class="control-button" id="copy-measures">复制 JSON</button>
         <span role="status" id="copy-measure-status"></span>
       </details>

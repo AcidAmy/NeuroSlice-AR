@@ -16,7 +16,6 @@ function validLayers(layers) {
 export function createLearningTools({ base, getCursor, getPlane, views, onPreset, onRoundStart, onRetry }) {
   const byId = id => document.getElementById(id);
   const markerKeys = new WeakMap();
-  const layerLabel = byId('annotation-layer');
   const annotationToggle = byId('toggle-annotations');
   const presetShelf = byId('slice-preset-shelf');
   const presetGrid = byId('slice-presets');
@@ -58,12 +57,11 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
       button.type = 'button';
       button.className = 'slice-preset';
       button.setAttribute('aria-pressed', 'false');
-      button.title = layer.surfaceLandmark;
       const name = document.createElement('span');
       name.textContent = layer.title || layer.structures[0].name;
       const readout = document.createElement('small');
       readout.className = 'numeric';
-      readout.textContent = `${layer.landmarkLabel || layer.surfaceLandmark} · ${Math.round(layer.sliceRatio * 100)}%`;
+      readout.textContent = layer.landmarkLabel || layer.surfaceLandmark;
       button.append(name, readout);
       button.addEventListener('click', () => {
         if (series && !quizMode) onPreset(layerForRatio(layer.sliceRatio, series.dimensions[2]));
@@ -97,11 +95,6 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     const layer = getPlane() === 'axial' ? axialLayer : undefined;
     if (layer !== shownLayer) {
       shownLayer = layer;
-      layerLabel.hidden = !layer;
-      if (layer) {
-        layerLabel.textContent = layer.surfaceLandmark;
-        layerLabel.title = layer.surfaceLandmark;
-      }
       for (const [id, button] of presetButtons) button.setAttribute('aria-pressed', String(layer?.id === id));
     }
     for (const view of views) {
@@ -146,7 +139,6 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     quizResult.textContent = `${timedOut ? '时间到。' : ''}${score.grade} · ${score.points} 分 · 误差 ${score.errorSlices} 层${physical} · 目标第 ${round.target.index + 1} 层`;
     quizResult.dataset.semantic = score.grade === '精准命中' ? 'coronal' : 'sagittal';
     quizResult.hidden = false;
-    byId('quiz-record').textContent = `本次已完成 ${scores.length} 轮`;
     submitButton.disabled = true;
     nextButton.disabled = false;
   }
@@ -184,7 +176,6 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     const nextMode = mode === 'quiz';
     if (quizMode === nextMode) return;
     quizMode = nextMode;
-    byId('quiz-intro').hidden = !quizMode;
     quizPanel.hidden = !quizMode;
     drawAnnotations();
     if (quizMode) {
