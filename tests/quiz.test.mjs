@@ -5,16 +5,34 @@ import { layerForRatio, pickQuizTarget, QUIZ_DURATION_MS, scoreQuiz } from '../s
 
 const layers = JSON.parse(readFileSync(new URL('../public/data/annotations.json', import.meta.url)));
 
-test('quiz uses the five shipped levels at both 120 and 160 slices', () => {
-  assert.equal(layers.length, 5);
+test('quiz uses all 13 verified axial levels and 49 unique structures across depths', () => {
+  assert.equal(layers.length, 13);
   assert.equal(QUIZ_DURATION_MS, 15_000);
+  const ids = layers.map(layer => layer.id);
+  assert.equal(new Set(ids).size, 13);
+
+  const webSlices192 = layers.map(layer => layerForRatio(layer.sliceRatio, 192) + 1);
+  assert.deepEqual(webSlices192, [156, 146, 125, 119, 116, 102, 100, 94, 83, 79, 66, 56, 32]);
+
+  const allStructures = layers.flatMap(layer => layer.structures);
+  assert.equal(allStructures.length, 49);
+  assert.equal(new Set(allStructures.map(item => item.name)).size, 49);
+
   assert.equal(layerForRatio(0.65, 120), 77);
   assert.equal(layerForRatio(0.65, 160), 103);
-  const target = pickQuizTarget(layers, 160, undefined, () => 0);
-  assert.equal(target.name, '半卵圆中心');
-  assert.equal(target.index, 121);
-  assert.ok(target.hint);
-  assert.notEqual(pickQuizTarget(layers, 160, target.name, () => 0).name, target.name);
+
+  const firstTarget = pickQuizTarget(layers, 192, undefined, () => 0);
+  assert.equal(firstTarget.name, '中央前回');
+  assert.equal(firstTarget.layerTitle, '顶部中央沟区');
+  assert.equal(firstTarget.index, 155);
+  assert.ok(firstTarget.hint);
+
+  const lastTarget = pickQuizTarget(layers, 192, undefined, () => 0.9999);
+  assert.equal(lastTarget.name, '腮腺区');
+  assert.equal(lastTarget.layerTitle, '下颌骨与口腔');
+  assert.equal(lastTarget.index, 31);
+
+  assert.notEqual(pickQuizTarget(layers, 192, firstTarget.name, () => 0).name, firstTarget.name);
   assert.equal(pickQuizTarget([], 120), null);
 });
 

@@ -4,6 +4,7 @@ export const layerForRatio = (ratio, depth) => Math.round(ratio * (depth - 1));
 export function pickQuizTarget(layers, depth, previousName, random = Math.random, axis = 2) {
   const all = layers.flatMap(layer => layer.structures.map(structure => ({
     name: structure.name,
+    layerTitle: layer.title || '',
     index: layerForRatio([structure.x, structure.y, layer.sliceRatio][axis], depth),
     hint: axis === 2 ? layer.quizQuestion : axis === 1
       ? '沿前后轴寻找结构所在的冠状面。' : '沿左右轴寻找结构所在的矢状面。',

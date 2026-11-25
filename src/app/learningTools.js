@@ -51,12 +51,25 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     byId('anatomy-name').focus({ preventScroll: true });
   }
 
+  function updatePresetReadouts() {
+    if (!series) return;
+    const depth = series.dimensions[2];
+    for (const layer of layers) {
+      const button = presetButtons.get(layer.id);
+      if (!button) continue;
+      const sliceNumber = layerForRatio(layer.sliceRatio, depth) + 1;
+      const landmark = layer.landmarkLabel || layer.surfaceLandmark;
+      button.querySelector('small').textContent = `${sliceNumber} · ${landmark}`;
+    }
+  }
+
   function buildPresets() {
     for (const layer of layers) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'slice-preset';
       button.setAttribute('aria-pressed', 'false');
+      button.title = `${layer.title || layer.structures[0].name} · ${layer.surfaceLandmark}`;
       const name = document.createElement('span');
       name.textContent = layer.title || layer.structures[0].name;
       const readout = document.createElement('small');
@@ -69,6 +82,7 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
       presetButtons.set(layer.id, button);
       presetGrid.append(button);
     }
+    updatePresetReadouts();
   }
 
   function drawAnnotations() {
@@ -96,6 +110,11 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     if (layer !== shownLayer) {
       shownLayer = layer;
       for (const [id, button] of presetButtons) button.setAttribute('aria-pressed', String(layer?.id === id));
+      const activeButton = layer && presetButtons.get(layer.id);
+      if (activeButton && presetGrid.scrollWidth > presetGrid.clientWidth) {
+        const left = activeButton.offsetLeft - (presetGrid.clientWidth - activeButton.offsetWidth) / 2;
+        presetGrid.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+      }
     }
     for (const view of views) {
       view.overlay.hidden = !showMarkers || (layout !== 'mpr' && view.key !== layout) ||
@@ -136,7 +155,8 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     scores.push({ ...score, target: round.target.name, targetIndex: round.target.index, actualIndex: actual, timedOut });
     const spacingLabel = series.spacingSource === 'metadata' ? '按资产间距' : '按示意间距';
     const physical = score.errorMm === null ? '' : `（约 ${score.errorMm} mm，${spacingLabel}）`;
-    quizResult.textContent = `${timedOut ? '时间到。' : ''}${score.grade} · ${score.points} 分 · 误差 ${score.errorSlices} 层${physical} · 目标第 ${round.target.index + 1} 层`;
+    const layerNote = round.axis === 2 && round.target.layerTitle ? ` · ${round.target.layerTitle}` : '';
+    quizResult.textContent = `${timedOut ? '时间到。' : ''}${score.grade} · ${score.points} 分 · 误差 ${score.errorSlices} 层${physical} · 目标第 ${round.target.index + 1} 层${layerNote}`;
     quizResult.dataset.semantic = score.grade === '精准命中' ? 'coronal' : 'sagittal';
     quizResult.hidden = false;
     submitButton.disabled = true;
@@ -223,6 +243,11 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     startRound();
   }
   retry.addEventListener('click', onRetry);
+  presetGrid.addEventListener('wheel', event => {
+    if (!event.deltaY || presetGrid.scrollWidth <= presetGrid.clientWidth) return;
+    event.preventDefault();
+    presetGrid.scrollLeft += event.deltaY;
+  }, { passive: false });
 
   return {
     drawAnnotations, setMode, checkDeadline, loadAnnotations,
@@ -239,6 +264,7 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
         round = null;
       }
       series = value;
+      updatePresetReadouts();
       drawAnnotations();
       startRound();
     },
