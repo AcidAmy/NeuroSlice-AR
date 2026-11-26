@@ -1,4 +1,4 @@
-import { PLANES, projectVoxel } from '../core/mpr.js';
+import { PLANES, headFrame, projectPointToOblique, projectVoxel } from '../core/mpr.js';
 import { layerForRatio, pickQuizTarget, QUIZ_DURATION_MS, scoreQuiz } from '../core/quiz.js';
 import { readAssetJson } from '../core/staticAssets.js';
 
@@ -13,7 +13,10 @@ function validLayers(layers) {
     new Set(layers.map(layer => layer.id)).size === layers.length;
 }
 
-export function createLearningTools({ base, getCursor, getPlane, views, onPreset, onRoundStart, onRetry }) {
+export function createLearningTools({
+  base, getCursor, getPlane, getObliqueFrames = () => null, views,
+  onPreset, onRoundStart, onRetry, onModeChange = () => {},
+}) {
   const byId = id => document.getElementById(id);
   const markerKeys = new WeakMap();
   const annotationToggle = byId('toggle-annotations');
@@ -94,9 +97,11 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     annotationToggle.dataset.semantic = getPlane();
     if (!series) return;
     const dimensions = series.dimensions;
+    const spacing = series.spacing;
     const cursor = getCursor();
+    const obliqueFrames = getObliqueFrames();
     let axialLayer;
-    if (!quizMode) {
+    if (!quizMode && !obliqueFrames) {
       let smallest = 3;
       for (const item of layers) {
         const distance = Math.abs(layerForRatio(item.sliceRatio, dimensions[2]) - cursor[2]);
@@ -120,17 +125,45 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
       view.overlay.hidden = !showMarkers || (layout !== 'mpr' && view.key !== layout) ||
         (view.modality === 'mri' && !series.mri);
       if (view.overlay.hidden) continue;
+      const frame = obliqueFrames?.[view.key] ?? null;
       const hits = [];
-      for (const entry of view.key === 'axial' ? (axialLayer ? [axialLayer] : []) : layers) {
-        for (const [i, item] of entry.structures.entries()) {
-          const voxel = [item.x, item.y, entry.sliceRatio].map((ratio, axis) => layerForRatio(ratio, dimensions[axis]));
-          if (Math.abs(voxel[view.plane.axis] - cursor[view.plane.axis]) > 2) continue;
-          const position = view.key === 'axial' ? [item.x, item.y] : projectVoxel(view.plane, voxel, dimensions);
-          hits.push({ key: entry.id + '/' + i, item, position });
+      if (frame) {
+        const planeDepth = dimensions[view.plane.axis];
+        for (const entry of layers) {
+          for (const [i, item] of entry.structures.entries()) {
+            const voxel = [
+              item.x * (dimensions[0] - 1),
+              item.y * (dimensions[1] - 1),
+              entry.sliceRatio * (dimensions[2] - 1),
+            ];
+            const headPoint = headFrame(voxel, dimensions, spacing).point;
+            const projected = projectPointToOblique(frame, headPoint, planeDepth);
+            if (projected.distSlices > 2.2 || projected.u < 0 || projected.u > 1 ||
+                projected.v < 0 || projected.v > 1) continue;
+            hits.push({ key: entry.id + '/' + i, item, position: [projected.u, projected.v] });
+          }
+        }
+      } else {
+        for (const entry of view.key === 'axial' ? (axialLayer ? [axialLayer] : []) : layers) {
+          for (const [i, item] of entry.structures.entries()) {
+            const voxel = [item.x, item.y, entry.sliceRatio].map((ratio, axis) => layerForRatio(ratio, dimensions[axis]));
+            if (Math.abs(voxel[view.plane.axis] - cursor[view.plane.axis]) > 2) continue;
+            const position = view.key === 'axial' ? [item.x, item.y] : projectVoxel(view.plane, voxel, dimensions);
+            hits.push({ key: entry.id + '/' + i, item, position });
+          }
         }
       }
       const key = hits.map(hit => hit.key).join('|');
-      if (markerKeys.get(view.overlay) === key) continue;
+      if (markerKeys.get(view.overlay) === key) {
+        if (frame) {
+          const children = view.overlay.children;
+          for (let i = 0; i < hits.length; i++) {
+            children[i].style.setProperty('--point-x', hits[i].position[0] * 100 + '%');
+            children[i].style.setProperty('--point-y', hits[i].position[1] * 100 + '%');
+          }
+        }
+        continue;
+      }
       markerKeys.set(view.overlay, key);
       view.overlay.replaceChildren(...hits.map(({ item, position }) => {
         const button = document.createElement('button');
@@ -197,6 +230,7 @@ export function createLearningTools({ base, getCursor, getPlane, views, onPreset
     if (quizMode === nextMode) return;
     quizMode = nextMode;
     quizPanel.hidden = !quizMode;
+    onModeChange(quizMode);
     drawAnnotations();
     if (quizMode) {
       quizTarget.textContent = loadFailed ? '暂时无法读取题库' : '加载题库与切片后开始';

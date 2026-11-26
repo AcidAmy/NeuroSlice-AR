@@ -1,7 +1,7 @@
 import {
   ClampToEdgeWrapping, DataTexture, DoubleSide, LinearFilter, RGBAFormat, ShaderMaterial, Vector2,
 } from 'three';
-import { rescaleVoxel, sliceAddress } from '../core/mpr.js';
+import { rescaleVoxel, sampleObliqueSlice, sliceAddress } from '../core/mpr.js';
 
 function smoothAlpha(value, start, end) {
   if (value <= start) return 0;
@@ -82,31 +82,69 @@ export function createSliceTexture(plane, aperture) {
       }
     `,
   });
-  let lastSeries, lastIndex, lastTone;
+  let lastSeries, lastIndex, lastTone, lastObliqueKey, lastDraft;
+
+  function ensureSize(width, height) {
+    if (texture.image.width !== width || texture.image.height !== height) {
+      texture.dispose();
+      texture.image = { data: new Uint8Array(width * height * 4), width, height };
+      material.uniforms.uvScale.value.set(1 - 1 / width, 1 / height - 1);
+      material.uniforms.uvOffset.value.set(0.5 / width, 1 - 0.5 / height);
+    }
+  }
+
   return {
     material,
     clear() {
       if (!lastSeries) return;
       texture.dispose();
       texture.image = { data: new Uint8Array(4), width: 0, height: 0 };
-      lastSeries = lastTone = undefined;
+      lastSeries = lastTone = lastObliqueKey = lastDraft = undefined;
     },
-    update(series, cursorIndex, tone) {
+    update(series, cursorIndex, tone, oblique = null) {
       const dimensions = tone.dimensions ?? series.dimensions;
-      const index = rescaleVoxel(cursorIndex, series.dimensions[plane.axis], dimensions[plane.axis]);
-      if (lastSeries?.deref() === series && lastIndex === cursorIndex && lastTone?.deref() === tone) return;
-      const [width, height] = plane.axes.map(axis => dimensions[axis]);
-      if (texture.image.width !== width || texture.image.height !== height) {
-        texture.dispose();
-        texture.image = { data: new Uint8Array(width * height * 4), width, height };
-        material.uniforms.uvScale.value.set(1 - 1 / width, 1 / height - 1);
-        material.uniforms.uvOffset.value.set(0.5 / width, 1 - 0.5 / height);
+      if (oblique?.frame) {
+        const draft = Boolean(oblique.draft);
+        if (lastSeries?.deref() === series && lastTone?.deref() === tone &&
+            lastObliqueKey === oblique.key && lastDraft === draft) return;
+        const [fullW, fullH] = plane.axes.map(axis => dimensions[axis]);
+        const scale = draft ? (oblique.draftScale ?? 0.5) : 1;
+        const width = draft ? Math.max(48, Math.min(fullW, Math.round(fullW * scale))) : fullW;
+        const height = draft ? Math.max(48, Math.min(fullH, Math.round(fullH * scale))) : fullH;
+        ensureSize(width, height);
+        const ct = series.ct;
+        sampleObliqueSlice(
+          texture.image.data, width, height, oblique.frame, dimensions, tone.volume, tone.lut, tone.bias,
+          {
+            trilinear: !draft,
+            alphaMask: {
+              ct,
+              ctDims: series.ctDimensions ?? series.dimensions,
+              realCt: Boolean(ct && series.source === 'local'),
+            },
+          },
+        );
+        texture.needsUpdate = true;
+        lastSeries = new WeakRef(series);
+        lastIndex = undefined;
+        lastTone = new WeakRef(tone);
+        lastObliqueKey = oblique.key;
+        lastDraft = draft;
+        return;
       }
+
+      const index = rescaleVoxel(cursorIndex, series.dimensions[plane.axis], dimensions[plane.axis]);
+      if (lastObliqueKey === undefined && lastSeries?.deref() === series &&
+          lastIndex === cursorIndex && lastTone?.deref() === tone) return;
+      const [width, height] = plane.axes.map(axis => dimensions[axis]);
+      ensureSize(width, height);
       fillSlice(texture.image.data, width, height, plane, index, cursorIndex, series, tone, dimensions);
       texture.needsUpdate = true;
       lastSeries = new WeakRef(series);
       lastIndex = cursorIndex;
       lastTone = new WeakRef(tone);
+      lastObliqueKey = undefined;
+      lastDraft = undefined;
     },
   };
 }

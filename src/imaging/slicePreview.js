@@ -1,4 +1,4 @@
-import { PLANES, rescaleVoxel, sliceAddress } from '../core/mpr.js';
+import { PLANES, rescaleVoxel, sampleObliqueSlice, sliceAddress } from '../core/mpr.js';
 
 import { createSliceTone } from '../core/sliceTone.js';
 
@@ -23,7 +23,7 @@ export function createMprPreview(entries, series, resolveTone = createSliceTone(
     const context = canvas.getContext('2d', { alpha: false });
     return { canvas, key, modality, plane: PLANES[key], context };
   });
-  return (cursor, options, selected, currentSeries = series) => {
+  return (cursor, options, selected, currentSeries = series, oblique = null) => {
     const ctTone = resolveTone(currentSeries, 'ct', options);
     const mriTone = resolveTone(currentSeries, 'mri', options);
     for (const view of views) {
@@ -31,12 +31,39 @@ export function createMprPreview(entries, series, resolveTone = createSliceTone(
       const tone = view.modality === 'ct' ? ctTone : mriTone;
       if (!tone) {
         view.lastTone = undefined;
+        view.lastObliqueKey = undefined;
         continue;
       }
       const { plane, canvas, context } = view;
       const dims = tone.dimensions;
+      const obliqueFrame = oblique?.frames?.[view.key] ?? null;
+      if (obliqueFrame) {
+        const draft = Boolean(oblique.draft);
+        if (view.lastObliqueKey === oblique.key && view.lastDraft === draft && view.lastTone?.deref() === tone) continue;
+        const [fullW, fullH] = plane.axes.map(axis => dims[axis]);
+        const scale = draft ? (oblique.draftScale ?? 0.5) : 1;
+        const width = draft ? Math.max(48, Math.min(fullW, Math.round(fullW * scale))) : fullW;
+        const height = draft ? Math.max(48, Math.min(fullH, Math.round(fullH * scale))) : fullH;
+        if (!view.pixels || canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          const dataImage = context.createImageData(width, height);
+          view.pixels = { width, height, dataImage, data: dataImage.data };
+        }
+        sampleObliqueSlice(
+          view.pixels.data, width, height, obliqueFrame, dims, tone.volume, tone.lut, tone.bias,
+          { trilinear: !draft },
+        );
+        context.putImageData(view.pixels.dataImage, 0, 0);
+        view.lastIndex = undefined;
+        view.lastObliqueKey = oblique.key;
+        view.lastDraft = draft;
+        view.lastTone = new WeakRef(tone);
+        continue;
+      }
+
       const index = rescaleVoxel(cursor[plane.axis], currentSeries.dimensions[plane.axis], dims[plane.axis]);
-      if (view.lastIndex === index && view.lastTone?.deref() === tone) continue;
+      if (view.lastObliqueKey === undefined && view.lastIndex === index && view.lastTone?.deref() === tone) continue;
       const [width, height] = plane.axes.map(axis => dims[axis]);
       if (!view.pixels || canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
@@ -46,6 +73,8 @@ export function createMprPreview(entries, series, resolveTone = createSliceTone(
       }
       paint(context, view.pixels, tone.volume, sliceAddress(plane, index, dims), tone.lut, tone.bias);
       view.lastIndex = index;
+      view.lastObliqueKey = undefined;
+      view.lastDraft = undefined;
       view.lastTone = new WeakRef(tone);
     }
   };

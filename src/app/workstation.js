@@ -10,7 +10,11 @@ import { createSpatialMapper } from '../core/spatialMapper.js';
 import { createPerformanceMonitor } from '../core/performanceMonitor.js';
 import { createLearningTools } from './learningTools.js';
 import { bindMeasurementPanel } from './measurementPanel.js';
-import { PLANES, clampVoxel } from '../core/mpr.js';
+import {
+  OBLIQUE_ENTER_RAD, OBLIQUE_EXIT_RAD, OBLIQUE_STEP_RAD, PLANES,
+  buildObliqueFrames, clampVoxel, headFrame, headToVoxel, invertQuaternion,
+  obliquePointToHead, obliqueSliceIndex, quatAngle, quatDeltaAngle, stepObliquePivot,
+} from '../core/mpr.js';
 import { createMprViews } from '../ui/mprViews.js';
 import { installPrecisionScrubber } from '../ui/precisionScrubber.js';
 import { bindToneControls } from './toneControls.js';
@@ -27,6 +31,7 @@ const fps = byId('fps-value');
 const sliceInput = byId('slice-index');
 const sliceBack = byId('slice-back');
 const sliceForward = byId('slice-forward');
+const obliqueToggle = byId('toggle-oblique');
 const calibration = byId('calibration-panel');
 const base = import.meta.env.BASE_URL;
 const { available = [], models: modelAssets, assetRelease } =
@@ -58,11 +63,133 @@ let fpsStart = 0;
 let fpsSamples = 0;
 let manualPointer = null;
 let wheelDelta = 0;
+let quizMode = false;
+let obliqueEnabled = false;
+let obliqueActive = false;
+let obliqueQuat = null;
+let obliqueFrames = null;
+let obliqueDraft = false;
+let obliqueKey = 0;
+let obliqueRefineTimer = null;
+let headPivot = null;
+
+function obliquePayload() {
+  if (!obliqueFrames) return null;
+  return {
+    frames: obliqueFrames,
+    draft: obliqueDraft,
+    draftScale: quality.ratio < 1 ? 0.45 : 0.55,
+    key: obliqueKey,
+  };
+}
+
+function clearObliqueRefine() {
+  if (obliqueRefineTimer !== null) {
+    clearTimeout(obliqueRefineTimer);
+    obliqueRefineTimer = null;
+  }
+}
+
+function syncObliqueToggle() {
+  obliqueToggle.disabled = quizMode;
+  obliqueToggle.setAttribute('aria-pressed', String(obliqueEnabled));
+  obliqueToggle.dataset.semantic = activePlane;
+}
+
+function syncSliceReadout() {
+  sliceInput.value = index;
+  sliceTrack.sync({ valueText: `${String(index + 1).padStart(String(depth).length, '0')} / ${depth}` });
+}
+
+function scheduleObliqueRefine() {
+  clearObliqueRefine();
+  obliqueRefineTimer = setTimeout(() => {
+    obliqueRefineTimer = null;
+    if (!obliqueFrames || !obliqueDraft) return;
+    obliqueDraft = false;
+    paintCurrentSlices();
+    if (display.showPlanes && display.showSliceTexture) drawAR();
+  }, 120);
+}
+
+function commitObliqueState(nextQuat, { draft = false } = {}) {
+  headPivot ??= headFrame(cursor, dimensions, spacing).point;
+  obliqueActive = true;
+  obliqueQuat = nextQuat;
+  obliqueDraft = draft;
+  obliqueKey++;
+  obliqueFrames = buildObliqueFrames(headPivot, dimensions, spacing, obliqueQuat);
+  cursor = headToVoxel(headPivot, dimensions, spacing).map((value, axis) => clampVoxel(value, dimensions[axis]));
+  index = obliqueSliceIndex(obliqueFrames[activePlane], headPivot, depth);
+  syncSliceReadout();
+  paintCurrentSlices();
+  mpr.render(cursor, obliqueFrames);
+  learning.drawAnnotations();
+  if (draft) scheduleObliqueRefine();
+  else clearObliqueRefine();
+}
+
+function exitObliquePose({ redraw = true } = {}) {
+  clearObliqueRefine();
+  if (headPivot) {
+    cursor = headToVoxel(headPivot, dimensions, spacing).map((value, axis) => clampVoxel(value, dimensions[axis]));
+  }
+  headPivot = null;
+  obliqueActive = false;
+  obliqueQuat = null;
+  obliqueFrames = null;
+  obliqueDraft = false;
+  renderedSliceView = undefined;
+  index = cursor[PLANES[activePlane].axis];
+  chooseSlice(index, redraw);
+}
+
+function syncObliquePose(rawHeadQuat, { draft = true, force = false } = {}) {
+  if (!obliqueEnabled || !sliceSeries || !rawHeadQuat) return;
+  const nextOblique = invertQuaternion(rawHeadQuat);
+  const angle = quatAngle(nextOblique);
+  if (!obliqueActive) {
+    if (angle < OBLIQUE_ENTER_RAD) return;
+    headPivot = headFrame(cursor, dimensions, spacing).point;
+  } else {
+    if (angle < OBLIQUE_EXIT_RAD) {
+      exitObliquePose({ redraw: false });
+      return;
+    }
+    if (!force && obliqueQuat && quatDeltaAngle(obliqueQuat, nextOblique) < OBLIQUE_STEP_RAD) return;
+  }
+  commitObliqueState(nextOblique, { draft });
+}
+
+function setObliqueEnabled(next, { redraw = true } = {}) {
+  const target = Boolean(next) && !quizMode;
+  if (obliqueEnabled === target) {
+    syncObliqueToggle();
+    return;
+  }
+  obliqueEnabled = target;
+  syncObliqueToggle();
+  if (!obliqueEnabled) {
+    if (obliqueActive || headPivot) exitObliquePose({ redraw });
+    else if (redraw) drawAR();
+    return;
+  }
+  const rawHeadQuat = projection?.syncPose(Boolean(stopLoop), quality.ratio) ?? null;
+  syncObliquePose(rawHeadQuat, { draft: false, force: true });
+  if (redraw) drawAR();
+}
 
 const mpr = createMprViews(byId('scan-pair'), {
-  onPoint: (key, next) => {
+  onPoint: (key, next, point2d) => {
     learning.checkDeadline();
     activatePlane(key);
+    if (obliqueFrames?.[key] && point2d) {
+      headPivot = obliquePointToHead(obliqueFrames[key], point2d, dimensions, spacing);
+      commitObliqueState(obliqueQuat, { draft: false });
+      mapper.setManual(index, performance.now(), manualPointer !== null);
+      drawAR();
+      return;
+    }
     cursor = next;
     manualSlice(next[PLANES[key].axis]);
   },
@@ -99,12 +226,18 @@ mapper.reset(index);
 const monitor = createPerformanceMonitor();
 const paintMeasurements = bindMeasurementPanel(monitor);
 const learning = createLearningTools({
-  base, getCursor: () => cursor, getPlane: () => activePlane, views: mpr.entries,
+  base, getCursor: () => cursor, getPlane: () => activePlane, getObliqueFrames: () => obliqueFrames, views: mpr.entries,
   onRetry: retryAssets,
   onPreset: value => {
+    setObliqueEnabled(false, { redraw: false });
     if (layout !== 'mpr') selectLayout('axial');
     else activatePlane('axial');
     manualSlice(value);
+  },
+  onModeChange: active => {
+    quizMode = active;
+    if (quizMode) setObliqueEnabled(false, { redraw: true });
+    else syncObliqueToggle();
   },
   onRoundStart: () => {
     mapper.unlock();
@@ -122,7 +255,7 @@ const tones = bindToneControls(() => {
 let sliceTone = tones.options();
 
 function paintCurrentSlices() {
-  paintSlices?.(cursor, sliceTone, layout === 'mpr' ? undefined : layout, sliceSeries);
+  paintSlices?.(cursor, sliceTone, layout === 'mpr' ? undefined : layout, sliceSeries, obliquePayload());
 }
 
 function activatePlane(key) {
@@ -137,13 +270,16 @@ function activatePlane(key) {
 function configureSliceAxis() {
   const plane = PLANES[activePlane];
   depth = dimensions[plane.axis];
-  index = cursor[plane.axis];
+  index = obliqueFrames?.[activePlane] && headPivot
+    ? obliqueSliceIndex(obliqueFrames[activePlane], headPivot, depth)
+    : cursor[plane.axis];
   sliceInput.max = depth - 1;
-  sliceInput.value = index;
+  syncSliceReadout();
   sliceTrack.sync({ defaultValue: Math.round((depth - 1) * (activePlane === 'axial' ? 0.65 : 0.5)) });
   byId('slice-controls').dataset.semantic = activePlane;
   byId('toggle-scan-line').dataset.semantic = activePlane;
   byId('toggle-slice-texture').dataset.semantic = activePlane;
+  syncObliqueToggle();
   sliceTrack.label.textContent = plane.label;
   sliceInput.setAttribute('aria-label', plane.label);
 }
@@ -157,7 +293,14 @@ function selectLayout(value) {
     button.setAttribute('aria-pressed', String(button.dataset.mprLayout === value));
   }
   learning.setLayout(layout);
-  chooseSlice(index);
+  if (obliqueFrames) {
+    paintCurrentSlices();
+    mpr.render(cursor, obliqueFrames);
+    learning.drawAnnotations();
+    drawAR();
+  } else {
+    chooseSlice(index);
+  }
 }
 
 function drawAR() {
@@ -175,6 +318,7 @@ function drawAR() {
     allPlanes: display.allPlanes && layout === 'mpr',
     activePlane,
     cursor, dimensions, spacing,
+    oblique: obliquePayload(),
     opacity: controls.opacity.valueAsNumber / 100,
     xOffset: controls.xOffset.valueAsNumber / 100,
     yOffset: controls.yOffset.valueAsNumber / 100,
@@ -193,10 +337,19 @@ function updateSourceBadge() {
 
 function chooseSlice(value, redraw = true) {
   index = clampVoxel(value, depth);
+  if (obliqueFrames?.[activePlane]) {
+    headPivot = stepObliquePivot(
+      obliqueFrames[activePlane],
+      headPivot ?? headFrame(cursor, dimensions, spacing).point,
+      index, depth, dimensions, spacing,
+    );
+    commitObliqueState(obliqueQuat, { draft: false });
+    if (redraw) drawAR();
+    return;
+  }
   cursor[PLANES[activePlane].axis] = index;
-  sliceInput.value = index;
-  sliceTrack.sync({ valueText: `${String(index + 1).padStart(String(depth).length, '0')} / ${depth}` });
-  // 像素、十字线和标注独立更新。头姿帧和同层事件不进入断层绘制。
+  syncSliceReadout();
+  // 像素、十字线和标注独立更新。正交态下同层事件不重复进入断层绘制。
   const nextView = [...cursor, layout, activePlane];
   if (!renderedSliceView || nextView.some((value, i) => value !== renderedSliceView[i])) {
     renderedSliceView = nextView;
@@ -237,16 +390,21 @@ function endCamera(message) {
   cameraButton.disabled = false;
   delete cameraButton.dataset.live;
   cameraButton.textContent = '启动摄像头';
+  setObliqueEnabled(false, { redraw: false });
   setStatus(message);
   drawAR();
 }
 
 function handleFrame(data) {
   projection?.setFrame(data);
+  const rawHeadQuat = projection?.syncPose(true, quality.ratio) ?? null;
   learning.checkDeadline();
+  syncObliquePose(rawHeadQuat, { draft: true });
   const gesture = mapper.update({ ...data, depth: paintSlices ? depth : 0, plane: activePlane });
   byId('slice-lock').hidden = !gesture.locked;
-  if (gesture.index !== index) chooseSlice(gesture.index, false);
+  if (gesture.rawY !== null && !gesture.locked && !gesture.pickup && gesture.index !== index) {
+    chooseSlice(gesture.index, false);
+  }
   if (gesture.confirmed) learning.confirmGesture();
   if (!fpsStart) fpsStart = data.now;
   fpsSamples++;
@@ -300,6 +458,10 @@ async function toggleCamera() {
     fps.parentElement.hidden = false;
     setStatus();
     monitor.reset();
+    if (!quizMode) {
+      obliqueEnabled = true;
+      syncObliqueToggle();
+    }
     stopLoop = startLive({
       video, frame, onFrame: handleFrame,
       onFrameMeasured: (now, costMs, hand) => {
@@ -402,6 +564,7 @@ labelToggle.addEventListener('click', () => {
 for (const button of document.querySelectorAll('[data-mpr-layout]')) {
   button.addEventListener('click', () => selectLayout(button.dataset.mprLayout));
 }
+obliqueToggle.addEventListener('click', () => setObliqueEnabled(!obliqueEnabled));
 const calibrationValues = [
   [controls.scale, '缩放', 'value-scale'],
   [controls.scaleX, '宽度', 'value-scale-x'],
@@ -451,7 +614,10 @@ viewport.addEventListener('pointermove', event => {
       held.x = event.clientX;
       held.y = event.clientY;
       dragging = !stopLoop;
-      if (dragging) projection.dragPreview(dx, dy);
+      if (dragging) {
+        projection.dragPreview(dx, dy);
+        if (obliqueEnabled) syncObliquePose(projection.syncPose(false, quality.ratio), { draft: true });
+      }
     }
   }
   if (!dragging && !display.lens) return;
@@ -511,6 +677,9 @@ async function loadProjection(metadata, options) {
     }
     await projection.loadModels(downloads, options);
     modelSource = projection.modelSources;
+    if (obliqueEnabled && !obliqueActive) {
+      syncObliquePose(projection.syncPose(Boolean(stopLoop), quality.ratio), { draft: false, force: true });
+    }
     drawAR();
     projectionReady = !modelSource.includes('fallback');
     projectionLabel.textContent = '3D 模型加载失败';
@@ -550,7 +719,13 @@ function showSeries(series) {
   sliceInput.disabled = false;
   configureSliceAxis();
   if (!sameGrid) mapper.reset(index);
-  chooseSlice(index);
+  if (obliqueActive && obliqueQuat) {
+    if (!sameGrid) headPivot = headFrame(cursor, dimensions, spacing).point;
+    commitObliqueState(obliqueQuat, { draft: false });
+    drawAR();
+  } else {
+    chooseSlice(index);
+  }
 }
 
 const loadingPanel = byId('volume-loading');

@@ -20,8 +20,9 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
       card.dataset.plane = key;
       card.dataset.modality = modality;
       const heading = element('figcaption', 'mpr-caption');
+      const planeBadge = element('span', 'mpr-plane numeric', plane.short);
       const modalityName = element('span', 'mpr-modality', modality.toUpperCase());
-      heading.append(element('span', 'mpr-plane numeric', plane.short), modalityName);
+      heading.append(planeBadge, modalityName);
       const zoom = element('button', 'mpr-detail', '⤢');
       zoom.type = 'button';
       zoom.setAttribute('aria-label', '放大' + plane.label + ' ' + modality.toUpperCase());
@@ -41,20 +42,24 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
       const empty = element('span', 'mpr-empty', '未导入 MRI');
       empty.hidden = true;
       image.append(canvas, horizontal, vertical, overlay, empty);
-      for (const [i, side] of ['top', 'bottom', 'left', 'right'].entries()) {
-        image.append(element('span', 'mpr-direction numeric mpr-' + side, plane.tags[i]));
-      }
+      const directions = ['top', 'bottom', 'left', 'right'].map((side, i) => {
+        const node = element('span', 'mpr-direction numeric mpr-' + side, plane.tags[i]);
+        image.append(node);
+        return node;
+      });
       well.append(image);
       card.append(heading, well);
       container.append(card);
-      const entry = { card, canvas, image, key, modality, modalityName, overlay, plane, empty };
+      const entry = {
+        card, canvas, image, key, modality, modalityName, planeBadge, directions, overlay, plane, empty,
+      };
       entries.push(entry);
       let pointerId;
       function position(event) {
         if (!series || event.target.closest('button')) return;
         const bounds = image.getBoundingClientRect();
         const point = [(event.clientX - bounds.left) / bounds.width, (event.clientY - bounds.top) / bounds.height];
-        onPoint(key, pointToVoxel(plane, point, cursor, series.dimensions));
+        onPoint(key, pointToVoxel(plane, point, cursor, series.dimensions), point);
       }
       image.addEventListener('pointerdown', event => {
         if (event.button !== 0 || event.target.closest('button')) return;
@@ -81,16 +86,23 @@ export function createMprViews(container, { onPoint, onWheel, onDetail }) {
       entry.card.classList.toggle('is-active', entry.key === active);
     }
   }
-  function render(next) {
+  function render(next, obliqueFrames = null) {
     if (!series) return;
     cursor = next;
     for (const entry of entries) {
       if (entry.card.hidden) continue;
-      const [x, y] = projectVoxel(entry.plane, cursor, series.dimensions);
+      const frame = obliqueFrames?.[entry.key] ?? null;
+      const [x, y] = frame ? frame.cross : projectVoxel(entry.plane, cursor, series.dimensions);
       if (entry.crossX !== x) entry.image.style.setProperty('--cross-x', x * 100 + '%');
       if (entry.crossY !== y) entry.image.style.setProperty('--cross-y', y * 100 + '%');
       entry.crossX = x;
       entry.crossY = y;
+      const badgeText = frame && frame.angleDeg > 0 ? `${entry.plane.short} ${frame.angleDeg}°` : entry.plane.short;
+      if (entry.planeBadge.textContent !== badgeText) entry.planeBadge.textContent = badgeText;
+      const tags = frame ? frame.tags : entry.plane.tags;
+      for (let i = 0; i < 4; i++) {
+        if (entry.directions[i].textContent !== tags[i]) entry.directions[i].textContent = tags[i];
+      }
     }
   }
   return {

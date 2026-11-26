@@ -440,6 +440,7 @@ input[type="range"]::-moz-range-thumb { width: 7px; height: 10px; border: 0; bor
 .ar-viewport.is-orbitable:not(.is-live):active { cursor: grabbing; }
 
 .mpr-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 8px; }
+.mpr-toolbar-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mpr-grid { --shape: 1.13; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding-inline: 8px; }
 .mpr-grid:not([data-layout="mpr"]) { --shape: 1.05; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mpr-card { min-width: 0; overflow: hidden; border: var(--border); border-radius: 4px; background: var(--control); }
@@ -501,6 +502,7 @@ input[type="range"]::-moz-range-thumb { width: 7px; height: 10px; border: 0; bor
 
 @media (max-width: 455px) {
   .mpr-toolbar { gap: 4px; padding: 5px 6px; }
+  .mpr-toolbar-actions { gap: 4px; }
   .mpr-grid { gap: 4px; padding-inline: 5px; }
   .mpr-caption { gap: 3px; padding-inline: 3px; }
   .mpr-direction { font-size: 8px; }

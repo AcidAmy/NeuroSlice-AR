@@ -1,5 +1,5 @@
 import {
-  DirectionalLight, Group, HemisphereLight, Matrix4, OrthographicCamera, Raycaster, Scene,
+  DirectionalLight, Euler, Group, HemisphereLight, Matrix4, OrthographicCamera, Quaternion, Raycaster, Scene,
   Vector2, Vector3, Vector4, WebGLRenderer,
 } from 'three';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -12,6 +12,7 @@ import { createModelLabels } from './labels3d.js';
 import { createModelMaterials } from './modelMaterials.js';
 import { readOriginalModel } from '../core/modelSource.js';
 import { createSliceTone } from '../core/sliceTone.js';
+import { unmirrorQuaternion } from '../core/mpr.js';
 
 export function setLayerVisibility(skullGroup, brainGroup, layer) {
   skullGroup.visible = layer === 'skull' || layer === 'combined';
@@ -117,6 +118,8 @@ export function createProjection({
   let modelLabels;
   const updatePlanes = attachSlicePlanes(anatomy, apertureUniform);
   const calibrationDepth = new Vector3();
+  const previewEuler = new Euler();
+  const previewQuat = new Quaternion();
   const raycaster = new Raycaster();
   const ndc = new Vector2();
   let pickState;
@@ -182,10 +185,9 @@ export function createProjection({
     }
   }
 
-  function draw(options) {
-    const { live, opacity, half, lens, layer, xOffset, yOffset, zOffset, scale, scaleX, scaleY } = options;
-    resize(live ? Math.min(1.25, options.ratio) : options.ratio);
-    if (!width || !height) return;
+  function ensurePose(live, nextRatio) {
+    resize(live ? Math.min(1.25, nextRatio) : nextRatio);
+    if (!width || !height) return false;
     if (frame && (!map || frameWidth !== frame.width || frameHeight !== frame.height)) {
       frameWidth = frame.width;
       frameHeight = frame.height;
@@ -195,6 +197,24 @@ export function createProjection({
       fittedFrame = frame;
       pose = headPose.update(frame, map, width, height);
     }
+    return true;
+  }
+
+  function syncPose(live, nextRatio = ratio || 1) {
+    if (!ensurePose(live, nextRatio)) return null;
+    if (live) {
+      if (!pose) return null;
+      const { x, y, z, w } = pose.rotation;
+      return unmirrorQuaternion([x, y, z, w]);
+    }
+    orbit.apply(previewEuler);
+    previewQuat.setFromEuler(previewEuler);
+    return [previewQuat.x, previewQuat.y, previewQuat.z, previewQuat.w];
+  }
+
+  function draw(options) {
+    const { live, opacity, half, lens, layer, xOffset, yOffset, zOffset, scale, scaleX, scaleY } = options;
+    if (!ensurePose(live, options.ratio)) return;
     head.visible = !live || Boolean(pose);
     // 头姿以镜像坐标表达，模型自身的解剖左右也进入同一坐标基。
     anatomy.scale.x = live ? -1 : 1;
@@ -257,6 +277,7 @@ export function createProjection({
 
   return {
     draw,
+    syncPose,
     loadModels,
     get pendingModelNames() { return pendingModels().map(model => model.name); },
     setFrame,

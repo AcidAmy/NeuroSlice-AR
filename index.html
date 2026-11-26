@@ -105,7 +105,10 @@
           <button type="button" data-mpr-layout="coronal" data-semantic="coronal" aria-pressed="false">冠位</button>
           <button type="button" data-mpr-layout="sagittal" data-semantic="sagittal" aria-pressed="false">矢位</button>
         </div>
-        <button type="button" id="toggle-annotations" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>标注点</button>
+        <div class="mpr-toolbar-actions">
+          <button type="button" id="toggle-oblique" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>随动斜切</button>
+          <button type="button" id="toggle-annotations" class="control-button feature-toggle" data-semantic="axial" aria-pressed="false" aria-controls="scan-pair"><span class="toggle-indicator" aria-hidden="true"></span>标注点</button>
+        </div>
       </div>
       <div class="volume-loading" id="volume-loading">
         <progress id="volume-load-bar" max="100" aria-label="断层影像下载进度"></progress>
